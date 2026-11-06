@@ -76,6 +76,29 @@ sudo apt install ./build-deb/notepad-plus-plus-linux_1.0.0-1_amd64.deb
 - **XML 装在 `share` 而不是 `bin`**：`main.cpp` 按 `applicationDirPath()/../share/notepad-plus-plus-linux`
   相对推导，所以 `/usr`、`/usr/local`、甚至把 deb 解包到临时目录后直接运行都能命中，不依赖编译期绝对路径。
 
+## 发版（打 tag 并发布到 Gitee Release）
+
+```bash
+export GITEE_TOKEN=xxxxxxxx   # Gitee 私人令牌，勾选 projects 权限
+tools/release.sh v1.0.0
+```
+
+脚本依次完成：校验 tag 与 CMake 版本号一致 → 打 annotated tag → 全量构建 deb → 推送 tag →
+调 Gitee API 建 Release → 上传 deb 附件。Release 说明文字自动取上一个 tag 以来的提交标题。
+
+发版前必须先把 `CMakeLists.txt` 里 `project(... VERSION x.y.z)` 改成与 tag 相同的版本 ——
+**deb 的版本号来自这里而不是 tag**，不同步就会出现「tag 叫 v1.2.0、包却是 1.0.0-1」的事故。
+脚本会提前拦住，并在打包完成后再拿 `dpkg-deb -f` 核对一次实际产物版本。
+
+它还会拦住两种容易出错的情况：
+
+- 有未推送的提交 —— 否则 tag 指向的 commit 在远端不存在，Release 挂上去打不开。
+- `origin` 不是 Gitee 仓库（在带 GitHub 上游 remote 的源码树里跑会直接拒绝）。
+
+只想检查不发布：`tools/release.sh v1.0.0 --dry-run`（不建 tag、不推送、不上传，仍会构建出 deb）。
+
+令牌在 <https://gitee.com/profile/personal_access_tokens> 生成，只需 `projects` 权限。
+
 ## 应用图标
 
 图标源文件为 `notepad++.png`（1024x1024 官方 logo），由 `tools/gen_icons.py`（Pillow）
