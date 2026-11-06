@@ -76,6 +76,34 @@ sudo apt install ./build-deb/notepad-plus-plus-linux_1.0.0-1_amd64.deb
 - **XML 装在 `share` 而不是 `bin`**：`main.cpp` 按 `applicationDirPath()/../share/notepad-plus-plus-linux`
   相对推导，所以 `/usr`、`/usr/local`、甚至把 deb 解包到临时目录后直接运行都能命中，不依赖编译期绝对路径。
 
+### 「打开方式」里看不到本应用？
+
+装完 deb 却在右键菜单里找不到，通常不是包坏了。GNOME 的候选分两层，职责完全不同：
+
+- **「用其他应用打开…」完整对话框**读 `mimeinfo.cache` 的*已注册*列表，由 `postinst` 里的
+  `update-desktop-database` 生成，内容取决于 `.desktop` 的 `MimeType`。
+- **右键「打开方式」子菜单**只列*推荐*列表，来源是 `mimeapps.list` 的 `[Added Associations]`。
+  `MimeType` 写得再多也进不了这一层——gedit、Obsidian 等已经声明过该类型时，本应用就被挤出去，
+  表现成「装是装了，但菜单里没有」。
+
+子菜单这一层只能改用户配置，包无法代劳：`mimeapps.list` 属于用户/管理员策略，Debian 也不允许
+包去覆盖 `/usr/share/applications/mimeapps.list`（那是 `mime-support` 的公共文件）。用附带脚本补上：
+
+```bash
+cd npp-linux
+tools/register_open_with.py --dry-run   # 先看会动哪些类型，不落盘
+tools/register_open_with.py             # 给所有继承自 text/plain 的类型加关联，自动备份
+tools/register_open_with.py --remove    # 撤销
+```
+
+脚本扫 `/usr/share/mime/types` 后按 `Gio.content_type_is_a(t, "text/plain")` 筛选，所以
+`application/json`、`application/x-shellscript`、`application/toml` 这类非 `text/` 前缀的文本格式
+也会被覆盖；`application/octet-stream` 之类的二进制则不会被误加。
+
+`.desktop` 的 `Exec` 用 `%F`（本地文件列表）而不是 `%U`：`main.cpp` 只认本地路径，`%U` 传进来的是
+`file:///...`，`QFileInfo` 判定不存在，文件会被静默丢弃。缺少字段码时 GIO 报告
+`supports_files=False`，部分应用选择器会据此隐藏该应用。
+
 ## 发版（打 tag 并发布到 Gitee Release）
 
 ```bash
