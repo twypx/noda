@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(NotepadPlusPlus_Linux
-    VERSION 1.0.0
+    VERSION 1.0.1
     LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -128,6 +128,7 @@ set(APP_SOURCES
     src/EditorView.cpp
     src/DocumentBuffer.cpp
     src/StyleManager.cpp
+    src/SessionManager.cpp
     src/utils/EncodingConverter.cpp
     src/widgets/TitleBar.cpp
     src/dialogs/FindReplaceDialog.cpp

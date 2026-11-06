@@ -21,6 +21,11 @@ struct AppPreferences {
     bool showEOL{false};
     QString defaultEOL{"Unix (LF)"};
     QString defaultEncoding{"UTF-8"};
+
+    // 会话快照：默认开启，行为对齐 Notepad++ 的“记住上次会话 + 启用会话快照与周期性备份”。
+    bool rememberSession{true};
+    bool snapshotBackup{true};
+    int backupIntervalSec{7};
 };
 
 class PreferencesDialog : public QDialog {
@@ -48,6 +53,9 @@ private:
     QCheckBox* _eolCheck;
     QComboBox* _defaultEOLCombo;
     QComboBox* _defaultEncodingCombo;
+    QCheckBox* _rememberSessionCheck;
+    QCheckBox* _snapshotBackupCheck;
+    QSpinBox* _backupIntervalSpin;
 
     AppPreferences _prefs;
 };

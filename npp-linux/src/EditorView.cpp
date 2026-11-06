@@ -369,6 +369,41 @@ std::string EditorView::currentTextUtf8() const {
     return buf;
 }
 
+void EditorView::setTextFromUtf8(const std::string& utf8) {
+    // 恢复出来的内容属于“未保存的修改”，不能进入撤销栈：否则一次 Ctrl+Z 就回到空文档，
+    // 看起来像内容全丢了。清栈后把 savepoint 停在当前内容上，
+    // 由调用方显式把缓冲区标成已修改（对应上游 buf->setDirty(true)）。
+    send(SCI_SETUNDOCOLLECTION, 0);
+    sends(SCI_SETTEXT, 0, utf8.c_str());
+    send(SCI_SETUNDOCOLLECTION, 1);
+    send(SCI_EMPTYUNDOBUFFER);
+    send(SCI_SETSAVEPOINT);
+    updateLineNumberMarginWidth();
+}
+
+void EditorView::restoreViewState(int caretPos, int selStart, int selEnd, int firstVisibleLine) {
+    const sptr_t len = send(SCI_GETLENGTH);
+    // session.xml 里的位置来自上一次运行，文件可能已被外部改小，必须先夹到合法区间。
+    auto clampPos = [len](int pos) -> sptr_t {
+        if (pos < 0) return -1;
+        return (pos > len) ? len : static_cast<sptr_t>(pos);
+    };
+
+    const sptr_t caret = clampPos(caretPos);
+    const sptr_t selFrom = clampPos(selStart);
+    const sptr_t selTo = clampPos(selEnd);
+    if (selFrom >= 0 && selTo >= 0 && selFrom != selTo) {
+        send(SCI_SETSEL, static_cast<uptr_t>(selFrom), selTo);
+    } else {
+        send(SCI_GOTOPOS, static_cast<uptr_t>(caret < 0 ? 0 : caret));
+    }
+    send(SCI_SCROLLCARET);
+    // 放在 SCROLLCARET 之后：否则滚动位置又会被“把光标带进视野”覆盖掉。
+    if (firstVisibleLine > 0) {
+        send(SCI_SETFIRSTVISIBLELINE, static_cast<uptr_t>(firstVisibleLine));
+    }
+}
+
 bool EditorView::saveToFile(const QString& savePath) {
     QString targetPath = savePath.isEmpty() ? QString::fromStdString(_buffer->getFilePath()) : savePath;
     if (targetPath.isEmpty()) {

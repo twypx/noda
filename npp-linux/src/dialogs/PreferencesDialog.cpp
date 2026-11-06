@@ -5,6 +5,7 @@
 #include <QTabWidget>
 #include <QDialogButtonBox>
 #include <QGroupBox>
+#include <QLabel>
 
 PreferencesDialog::PreferencesDialog(const AppPreferences& current, QWidget* parent)
     : QDialog(parent)
@@ -104,6 +105,42 @@ void PreferencesDialog::setupUI(const AppPreferences& current) {
 
     tabWidget->addTab(pageNewDoc, "新建文档格式");
 
+    // Tab 4: 会话与备份（对应 Notepad++ 的两个独立开关，默认都开）
+    auto* pageSession = new QWidget();
+    auto* sessionLayout = new QVBoxLayout(pageSession);
+
+    _rememberSessionCheck = new QCheckBox("记住上次会话（下次启动恢复所有标签页）", this);
+    _rememberSessionCheck->setChecked(current.rememberSession);
+    sessionLayout->addWidget(_rememberSessionCheck);
+
+    _snapshotBackupCheck = new QCheckBox("启用会话快照与周期性备份（未保存的内容也能恢复）", this);
+    _snapshotBackupCheck->setChecked(current.snapshotBackup);
+    sessionLayout->addWidget(_snapshotBackupCheck);
+
+    auto* sessionHint = new QLabel(
+        "开启快照后退出时不再询问是否保存：未保存内容会写进\n"
+        "~/.config/Notepad++/backup/，下次启动连同光标位置一起恢复。", this);
+    sessionHint->setWordWrap(true);
+    sessionLayout->addWidget(sessionHint);
+
+    auto* intervalRow = new QHBoxLayout();
+    intervalRow->addWidget(new QLabel("备份间隔:", this));
+    _backupIntervalSpin = new QSpinBox(this);
+    _backupIntervalSpin->setRange(1, 600);
+    _backupIntervalSpin->setSuffix(" 秒");
+    _backupIntervalSpin->setValue(current.backupIntervalSec);
+    intervalRow->addWidget(_backupIntervalSpin);
+    intervalRow->addStretch();
+    sessionLayout->addLayout(intervalRow);
+    sessionLayout->addStretch();
+
+    // 没开快照时备份间隔无意义，直接置灰，避免用户以为调它就能生效。
+    _backupIntervalSpin->setEnabled(current.snapshotBackup);
+    connect(_snapshotBackupCheck, &QCheckBox::toggled,
+            _backupIntervalSpin, &QSpinBox::setEnabled);
+
+    tabWidget->addTab(pageSession, "会话与备份");
+
     mainLayout->addWidget(tabWidget);
 
     auto* btnBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -130,6 +167,9 @@ void PreferencesDialog::onAccept() {
     _prefs.showEOL = _eolCheck->isChecked();
     _prefs.defaultEOL = _defaultEOLCombo->currentText();
     _prefs.defaultEncoding = _defaultEncodingCombo->currentText();
+    _prefs.rememberSession = _rememberSessionCheck->isChecked();
+    _prefs.snapshotBackup = _snapshotBackupCheck->isChecked();
+    _prefs.backupIntervalSec = _backupIntervalSpin->value();
 
     accept();
 }

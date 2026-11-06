@@ -12,6 +12,7 @@
 #include <functional>
 #include <QStringList>
 #include "TabManager.h"
+#include "SessionManager.h"
 #include "dialogs/FindReplaceDialog.h"
 #include "dialogs/GoToLineDialog.h"
 #include "dialogs/ColumnEditorDialog.h"
@@ -21,6 +22,7 @@
 #include "dialogs/StyleConfigDialog.h"
 
 class QToolBar;
+class QTimer;
 
 class ClickableLabel : public QLabel {
     Q_OBJECT
@@ -216,6 +218,17 @@ private:
     void updateRecentFilesMenu();
     void applyPreferencesToEditor(EditorView* ed);
 
+    // ---- 会话快照（session.xml + backup/）----
+    // 复刻 Notepad++ 的“记住上次会话 + 周期性备份”：退出时不弹保存询问，
+    // 脏内容落盘到 backup/，下次启动按 session.xml 原样恢复。
+    bool restoreSession();
+    void saveSession();
+    QVector<SessionFile> collectSessionFiles(int& activeIndex) const;
+    void syncBackups();
+    void dropBackup(EditorView* ed);
+    SessionFile captureSessionFile(EditorView* ed) const;
+    void restartBackupTimer();
+
     TabManager* _tabManager{nullptr};
     FindReplaceDialog* _findDialog{nullptr};
     QFileSystemWatcher* _fileWatcher{nullptr};
@@ -225,6 +238,8 @@ private:
 
     AppPreferences _prefs;
     bool _isDarkMode{false};
+    // 周期性把脏缓冲区写成备份的定时器（同上游 launchDocumentBackupTask 的睡眠线程）。
+    QTimer* _backupTimer{nullptr};
 
     // 编码菜单单选管理
     QActionGroup* _encodingGroup{nullptr};

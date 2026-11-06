@@ -116,6 +116,7 @@ bool TabManager::closeTab(int index) {
         _closedFilesStack.append(QString::fromStdString(ed->buffer()->getFilePath()));
     }
 
+    emit editorClosing(ed);
     removeTab(index);
     delete ed;
 

@@ -26,6 +26,7 @@
 #include <QInputDialog>
 #include <QPrinter>
 #include <QPrintDialog>
+#include <QTimer>
 #include <vector>
 
 namespace {
@@ -121,14 +122,31 @@ MainWindow::MainWindow(QWidget* parent)
     connect(_tabManager, &TabManager::tabTitleChanged, this, [this](int) {
         syncWindowTitle();
     });
-    connect(_tabManager, &TabManager::editorCreated, this, &MainWindow::applyPreferencesToEditor);
+    connect(_tabManager, &TabManager::editorCreated, this, [this](EditorView* ed) {
+        applyPreferencesToEditor(ed);
+        // 缓冲区一旦回到“已保存”状态，旧备份必须立刻作废：否则程序被强杀后，
+        // session.xml 里记的 backupFilePath 会把旧内容盖回已经保存过的文件。
+        // 保存、另存、重新载入、外部修改自动重载都会走 savePointChanged -> 这里。
+        connect(ed, &EditorView::documentModified, this, [this, ed](bool modified) {
+            if (!modified) dropBackup(ed);
+        });
+    });
+    // 标签被销毁时删掉它的备份，不然 backup/ 下会留一堆没人引用的孤儿文件。
+    connect(_tabManager, &TabManager::editorClosing, this, &MainWindow::dropBackup);
     connect(_fileWatcher, &QFileSystemWatcher::fileChanged, this, &MainWindow::onFileChangedOnDisk);
 
-    auto* firstEd = _tabManager->createNewTab();
-    applyPreferences(_prefs);
-    if (firstEd) {
-        firstEd->applyDefaultDocFormat(eolFromPref(_prefs.defaultEOL), _prefs.defaultEncoding.toStdString());
+    _backupTimer = new QTimer(this);
+    connect(_backupTimer, &QTimer::timeout, this, &MainWindow::syncBackups);
+    restartBackupTimer();
+
+    // 上次会话有可恢复的内容就照原样恢复（含未保存文档），否则给一个空白标签。
+    if (!restoreSession()) {
+        auto* firstEd = _tabManager->createNewTab();
+        if (firstEd) {
+            firstEd->applyDefaultDocFormat(eolFromPref(_prefs.defaultEOL), _prefs.defaultEncoding.toStdString());
+        }
     }
+    applyPreferences(_prefs);
     reloadStyleOverrides();
 
     ThemeManager::applyTheme(_prefs.darkMode);
@@ -1442,6 +1460,15 @@ void MainWindow::applyPreferences(const AppPreferences& prefs) {
         if (!ed) continue;
         applyPreferencesToEditor(ed);
     }
+
+    restartBackupTimer();
+    // 关掉会话快照后，内存里的备份文件已经没人引用了（restoreSession 也不再读它），
+    // 顺手清掉，否则它们会在 backup/ 里永远留着。
+    if (!_prefs.rememberSession || !_prefs.snapshotBackup) {
+        for (int i = 0; i < _tabManager->count(); ++i) {
+            dropBackup(_tabManager->editorAt(i));
+        }
+    }
 }
 
 void MainWindow::applyPreferencesToEditor(EditorView* ed) {
@@ -1474,6 +1501,9 @@ void MainWindow::loadPreferences() {
     _prefs.showEOL = s.value("prefs/showEOL", false).toBool();
     _prefs.defaultEOL = s.value("prefs/defaultEOL", "Unix (LF)").toString();
     _prefs.defaultEncoding = s.value("prefs/defaultEncoding", "UTF-8").toString();
+    _prefs.rememberSession = s.value("prefs/rememberSession", true).toBool();
+    _prefs.snapshotBackup = s.value("prefs/snapshotBackup", true).toBool();
+    _prefs.backupIntervalSec = s.value("prefs/backupIntervalSec", 7).toInt();
 }
 
 void MainWindow::savePreferences() {
@@ -1491,6 +1521,182 @@ void MainWindow::savePreferences() {
     s.setValue("prefs/showEOL", _prefs.showEOL);
     s.setValue("prefs/defaultEOL", _prefs.defaultEOL);
     s.setValue("prefs/defaultEncoding", _prefs.defaultEncoding);
+    s.setValue("prefs/rememberSession", _prefs.rememberSession);
+    s.setValue("prefs/snapshotBackup", _prefs.snapshotBackup);
+    s.setValue("prefs/backupIntervalSec", _prefs.backupIntervalSec);
+}
+
+// ---------------- 会话快照（session.xml + backup/）----------------
+
+SessionFile MainWindow::captureSessionFile(EditorView* ed) const {
+    SessionFile f;
+    auto buf = ed->buffer();
+    f.path = QString::fromStdString(buf->getFilePath());
+    f.backupPath = QString::fromStdString(buf->getBackupFileName());
+    f.lang = QString::fromStdString(ed->currentLanguage());
+    f.encoding = QString::fromStdString(buf->getEncoding());
+    f.caretPos = static_cast<int>(ed->send(SCI_GETCURRENTPOS));
+    const auto anchor = ed->send(SCI_GETANCHOR);
+    const auto caret = ed->send(SCI_GETCURRENTPOS);
+    if (anchor != caret) {
+        f.selStart = static_cast<int>(qMin(anchor, caret));
+        f.selEnd = static_cast<int>(qMax(anchor, caret));
+    } else {
+        f.selStart = -1;
+        f.selEnd = -1;
+    }
+    f.firstVisibleLine = static_cast<int>(ed->send(SCI_GETFIRSTVISIBLELINE));
+    // 用 Scintilla 的 EOL 取值而不是 DocumentBuffer 的枚举，恢复时能原样回填。
+    f.eolMode = static_cast<int>(ed->send(SCI_GETEOLMODE));
+    f.newDocIndex = buf->getNewDocIndex();
+    f.readOnly = ed->isReadOnly();
+    return f;
+}
+
+QVector<SessionFile> MainWindow::collectSessionFiles(int& activeIndex) const {
+    QVector<SessionFile> files;
+    activeIndex = 0;
+    const int cur = _tabManager->currentIndex();
+
+    for (int i = 0; i < _tabManager->count(); ++i) {
+        auto* ed = _tabManager->editorAt(i);
+        if (!ed) continue;
+        auto buf = ed->buffer();
+        // 空白的未命名标签没有恢复价值（同上游：isUntitled && docLength()==0 直接跳过），
+        // 否则每次启动都会把上次那个空 "new 1" 也恢复出来。
+        if (buf->getFilePath().empty() && buf->getBackupFileName().empty()
+            && ed->send(SCI_GETLENGTH) == 0) {
+            continue;
+        }
+        if (i == cur) activeIndex = files.size();
+        files.append(captureSessionFile(ed));
+    }
+    return files;
+}
+
+void MainWindow::saveSession() {
+    if (!_prefs.rememberSession) return;
+    int activeIndex = 0;
+    const QVector<SessionFile> files = collectSessionFiles(activeIndex);
+    SessionManager::write(files, activeIndex);
+}
+
+void MainWindow::syncBackups() {
+    if (!_prefs.rememberSession || !_prefs.snapshotBackup) return;
+
+    bool sessionChanged = false;
+    for (int i = 0; i < _tabManager->count(); ++i) {
+        auto* ed = _tabManager->editorAt(i);
+        if (!ed) continue;
+        auto buf = ed->buffer();
+        const QString existing = QString::fromStdString(buf->getBackupFileName());
+
+        if (!buf->isModified()) {
+            // 已经回到“已保存”，备份作废。
+            if (!existing.isEmpty()) {
+                SessionManager::removeBackupFile(existing);
+                buf->setBackupFileName(std::string());
+                sessionChanged = true;
+            }
+            continue;
+        }
+
+        // 空白未命名标签不落盘，避免 backup/ 里堆满空文件。
+        if (existing.isEmpty() && buf->getFilePath().empty() && ed->send(SCI_GETLENGTH) == 0) {
+            continue;
+        }
+
+        QString target = existing;
+        if (target.isEmpty()) {
+            target = SessionManager::newBackupPath(QString::fromStdString(buf->getFileName()));
+            if (target.isEmpty()) continue;
+            buf->setBackupFileName(target.toStdString());
+            sessionChanged = true;
+        }
+        SessionManager::writeBackup(target, QString::fromStdString(ed->currentTextUtf8()));
+    }
+
+    // 新的 backupFilePath 必须马上写进 session.xml：否则程序被强杀时 session 里没有这条
+    // 记录，下次启动就找不到备份（这正是上游在创建备份文件后立即 saveCurrentSession 的原因）。
+    if (sessionChanged) saveSession();
+}
+
+void MainWindow::dropBackup(EditorView* ed) {
+    if (!ed) return;
+    auto buf = ed->buffer();
+    const std::string path = buf->getBackupFileName();
+    if (path.empty()) return;
+    SessionManager::removeBackupFile(QString::fromStdString(path));
+    buf->setBackupFileName(std::string());
+}
+
+void MainWindow::restartBackupTimer() {
+    if (!_backupTimer) return;
+    if (!_prefs.rememberSession || !_prefs.snapshotBackup) {
+        _backupTimer->stop();
+        return;
+    }
+    _backupTimer->start(_prefs.backupIntervalSec * 1000);
+}
+
+bool MainWindow::restoreSession() {
+    if (!_prefs.rememberSession) return false;
+
+    QVector<SessionFile> files;
+    int activeIndex = 0;
+    if (!SessionManager::read(files, activeIndex) || files.isEmpty()) return false;
+
+    int restored = 0;
+    int activeTab = -1;
+
+    for (const SessionFile& f : files) {
+        const bool hasBackup = _prefs.snapshotBackup && !f.backupPath.isEmpty()
+                               && QFile::exists(f.backupPath);
+        const bool hasFile = !f.path.isEmpty() && QFile::exists(f.path);
+        // 文件已被删且没有备份：没东西可恢复（上游会建占位文档，这里直接跳过）。
+        if (!hasBackup && !hasFile) continue;
+
+        EditorView* ed = nullptr;
+        if (hasBackup) {
+            QFile backup(f.backupPath);
+            if (!backup.open(QIODevice::ReadOnly)) continue;
+            const QByteArray bytes = backup.readAll();
+
+            ed = _tabManager->createNewTab();
+            if (!ed) continue;
+            auto buf = ed->buffer();
+            // 真正的磁盘路径、编码、语言都由这里回填：备份内容本身只是 UTF-8 文本，
+            // 下次保存时会按 buf 里的编码重新转码写回原文件。
+            buf->setFilePath(f.path.toStdString());
+            if (f.newDocIndex > 0) buf->setNewDocIndex(f.newDocIndex);
+            if (!f.encoding.isEmpty()) buf->setEncoding(f.encoding.toStdString());
+            ed->send(SCI_SETEOLMODE, f.eolMode);
+            buf->setLineEnding(f.eolMode == SC_EOL_CRLF ? LineEnding::CRLF
+                                : f.eolMode == SC_EOL_CR ? LineEnding::CR : LineEnding::LF);
+            ed->setTextFromUtf8(std::string(bytes.constData(), static_cast<size_t>(bytes.size())));
+            if (!f.lang.isEmpty()) ed->applyLanguage(f.lang.toStdString());
+            buf->setBackupFileName(f.backupPath.toStdString());
+            // 恢复出来的是“未保存的修改”，标签必须带 * 才对得上用户记忆里的状态。
+            buf->setModified(true);
+            _tabManager->updateTabTitle(_tabManager->indexOf(ed));
+        } else {
+            openFile(f.path); // 内部会顺带挂 inotify 监视、写入最近文件列表
+            ed = _tabManager->currentEditor();
+            if (!ed) continue;
+            // 编码/语言是用户上次手动选过的，不能被按扩展名重新猜一遍覆盖掉。
+            if (!f.encoding.isEmpty()) ed->buffer()->setEncoding(f.encoding.toStdString());
+            if (!f.lang.isEmpty()) ed->applyLanguage(f.lang.toStdString());
+        }
+
+        ed->restoreViewState(f.caretPos, f.selStart, f.selEnd, f.firstVisibleLine);
+        ed->setReadOnly(f.readOnly);
+        if (restored == activeIndex) activeTab = _tabManager->indexOf(ed);
+        ++restored;
+    }
+
+    if (restored == 0) return false;
+    if (activeTab >= 0) _tabManager->setCurrentIndex(activeTab);
+    return true;
 }
 
 // ---------------- 内部更新 ----------------
@@ -1582,9 +1788,26 @@ void MainWindow::paintEvent(QPaintEvent* event) {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
+    // 快照模式：退出不弹“是否保存”。未保存内容先落进 backup/，再写 session.xml，
+    // 下次启动原样恢复——这正是“不保存也能恢复”的全部前提，
+    // 与上游 isSnapshotMode() 下直接退出、不逐个询问的行为一致。
+    if (_prefs.rememberSession && _prefs.snapshotBackup) {
+        syncBackups();
+        saveSession();
+        event->accept();
+        return;
+    }
+
+    // 只“记住会话”而没开快照时，会话内容必须在 closeAll() 之前抓取：
+    // 那个调用会把标签全部删除，之后再取就只剩空表。
+    QVector<SessionFile> snapshot;
+    int activeIndex = 0;
+    if (_prefs.rememberSession) snapshot = collectSessionFiles(activeIndex);
+
     if (!_tabManager->closeAll()) {
         event->ignore();
         return;
     }
+    if (_prefs.rememberSession) SessionManager::write(snapshot, activeIndex);
     event->accept();
 }

@@ -34,6 +34,13 @@ public:
     // 为新建的空文档套用默认换行格式与编码（首选项 defaultEOL / defaultEncoding）。
     void applyDefaultDocFormat(LineEnding le, const std::string& enc);
 
+    // 会话快照用：取整篇文本的 UTF-8 视图（备份写盘）/ 用备份内容直接填充缓冲区。
+    // 不要把 setTextFromUtf8 当成"打开文件"用：它不动文件路径、编码与语言，
+    // 这些由调用方按 session.xml 里记录的值回填，才能保证下次保存仍按原编码写回。
+    std::string currentTextUtf8() const;
+    void setTextFromUtf8(const std::string& utf8);
+    void restoreViewState(int caretPos, int selStart, int selEnd, int firstVisibleLine);
+
     // 应用“全局样式配置器”里的默认前景/背景色覆盖（-1 表示不覆盖）。
     void applyGlobalStyleOverride(int fg, int bg);
 
@@ -193,7 +200,6 @@ private:
     void initEditorDefaults();
     std::string getSelectedOrWordText() const;
     void replaceSelectedText(const std::string& replacement);
-    std::string currentTextUtf8() const;
 
     std::shared_ptr<DocumentBuffer> _buffer;
     bool _isDarkMode{false};

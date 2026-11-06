@@ -34,6 +34,11 @@ public:
     bool isModified() const { return _isModified; }
     void setModified(bool modified) { _isModified = modified; }
 
+    // 会话快照的备份文件名：非空表示当前缓冲区有未保存内容已落盘到 backup/ 下
+    // （对应上游 Buffer::_backupFileName）。它只在第一次变脏时生成，之后保持不变。
+    const std::string& getBackupFileName() const { return _backupFileName; }
+    void setBackupFileName(const std::string& path) { _backupFileName = path; }
+
     const std::string& getEncoding() const { return _encoding; }
     void setEncoding(const std::string& enc) { _encoding = enc; }
 
@@ -56,6 +61,7 @@ public:
 
 private:
     std::string _filePath;
+    std::string _backupFileName;
     std::string _encoding{"UTF-8"};
     LineEnding _lineEnding{LineEnding::LF};
     bool _isModified{false};

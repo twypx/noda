@@ -21,6 +21,7 @@
    - [x] 跨平台换行符自动识别与状态栏显示（Unix LF / Windows CRLF / Mac CR）
    - [x] 毫秒级查找与替换（区分大小写、全字匹配、正则支持、全部替换）
    - [x] 磁盘文件外部修改实时监控与重载提醒（Linux `inotify` 驱动）
+   - [x] 会话记忆与未保存内容自动备份（关闭后重开可原样恢复，见下节）
 
 ## 编译环境依赖
 
@@ -103,6 +104,44 @@ tools/register_open_with.py --remove    # 撤销
 `.desktop` 的 `Exec` 用 `%F`（本地文件列表）而不是 `%U`：`main.cpp` 只认本地路径，`%U` 传进来的是
 `file:///...`，`QFileInfo` 判定不存在，文件会被静默丢弃。缺少字段码时 GIO 报告
 `supports_files=False`，部分应用选择器会据此隐藏该应用。
+
+## 会话记忆与自动备份
+
+与 Notepad++ 一致：关掉程序再打开，上次打开的标签、光标/选区位置、语言、编码都在；
+**没保存的修改也照样回来**，所以退出时不会逐个弹「是否保存」。
+
+机制是两层，缺一不可（对应上游 `PowerEditor/src/ScintillaComponent/Buffer.cpp` 中
+`backupCurrentBuffer()` 上方那段 *Specs and Algorithm of session snapshot & periodic backup system*）：
+
+| 位置 | 作用 |
+| --- | --- |
+| `~/.config/Notepad++/session.xml` | 记录打开了哪些文件、每个标签的 `startPos/endPos/firstVisibleLine/lang/encoding/eolMode/userReadOnly/backupFilePath`；结构与上游 session.xml 同构 |
+| `~/.config/Notepad++/backup/<标签名>@<YYYY-MM-DD_HHMMSS>` | 未保存内容的快照，统一以 UTF-8 存放 |
+
+工作流程：
+
+1. 定时器每 N 秒（默认 7s）扫一遍脏缓冲区，`<标签名>@<时间戳>` 只在**第一次变脏**时生成，
+   之后路径固定、反复覆盖；新建备份后立即写一次 `session.xml`，这样即使进程被 `kill -9`，
+   下次启动也能在 `session.xml` 里找到这条备份记录。
+2. 文档回到已保存状态（保存、另存、重新载入、外部修改重载）立刻删掉它的备份文件，
+   避免用旧内容把已保存的文件盖回去；标签关闭时同样清理。
+3. 退出时先把脏内容刷进 `backup/`、再写 `session.xml`，然后直接退——不弹保存框。
+4. 启动时读 `session.xml`，有 `backupFilePath` 且文件还在，就用备份内容重建标签并把
+   修改标记置为「已修改」；没有备份的按普通文件打开。
+
+几个细节：
+
+- 空白的未命名标签不写入会话（同上游 `isUntitled() && docLength()==0` 跳过），
+  否则每次启动都会多出一个空标签。
+- 备份内容统一存 UTF-8，恢复时按 `session.xml` 里的 `encoding` 回填缓冲区，
+  下次保存再转码写回原文件，不会把 GBK 文件改成 UTF-8。
+- 覆盖 `session.xml` 前会先复制一份 `session.xml.inCaseOfCorruption.bak`；解析失败时
+  自动回退读这份备份，一次坏写不会让会话永久丢失。
+- 恢复出来的内容不进撤销栈（否则一次 Ctrl+Z 就回到空文档），但仍带「已修改」标记，
+  保存一次即可清掉。
+
+开关在 **设置 → 首选项 → 会话与备份**：「记住上次打开的会话」控制 `session.xml`，
+「定时备份未保存内容」控制 `backup/` 与退出时不弹保存框，两者都可单独关闭。
 
 ## 发版（打 tag 并发布到 Gitee Release）
 

@@ -39,6 +39,8 @@ public:
 signals:
     void activeEditorChanged(EditorView* editor);
     void editorCreated(EditorView* editor);
+    // 标签即将被销毁：会话快照的备份文件要在这时删掉，否则会变成无人引用的孤儿文件。
+    void editorClosing(EditorView* editor);
     void tabTitleChanged(int index);
 
 private slots:
