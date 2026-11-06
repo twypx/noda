@@ -53,9 +53,12 @@ REPO="$(echo "$REMOTE_URL" | awk -F'[:/]' '{print $NF}')"
 API="https://gitee.com/api/v5/repos/${OWNER}/${REPO}"
 echo ">>> 仓库: ${OWNER}/${REPO}    tag: ${TAG}"
 
-# ---- 4. 本地不能有未推送的提交 ---------------------------------------------
-# 否则 tag 指向的 commit 在远端不存在，Release 挂上去会打不开。
-git fetch -q origin master 2>/dev/null || true
+# ---- 4. 同步远端状态 -------------------------------------------------------
+# 必须连 tag 一起拉：如果 tag 是在 Gitee 网页上打的，本地没有它，后面
+# git tag -a 会重复创建并导致 push 被拒。拉下来之后第 5 步就能识别成“已存在”。
+git fetch -q origin --tags 2>/dev/null || true
+
+# 本地不能有未推送的提交：否则 tag 指向的 commit 在远端不存在，Release 挂上去打不开。
 if [[ -n "$(git log origin/master..HEAD --oneline 2>/dev/null)" ]]; then
     echo "错误: 存在尚未推送的提交，请先 git push origin master" >&2
     git log origin/master..HEAD --oneline | sed 's/^/      /' >&2
