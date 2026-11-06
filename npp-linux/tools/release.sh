@@ -6,8 +6,9 @@
 #   tools/release.sh v1.0.0
 #   tools/release.sh v1.0.0 --dry-run  # 只做校验与构建，不推送、不建 Release
 #
-# 发版前先把 npp-linux/CMakeLists.txt 里 project(... VERSION x.y.z) 改成与 tag 一致，
-# 脚本会拦住不一致的情况 —— 否则会打出一个版本号对不上 tag 的包。
+# 发版前不必手动改版本号：脚本会自动把 npp-linux/CMakeLists.txt 里 project(... VERSION x.y.z)
+# 改成与 tag 一致，并把这个改动提交、推送（tag 必须指向含正确版本号的 commit）。
+# 工作区若还有别的不提交改动，脚本会警告：deb 从工作区构建，会包含它们，但 tag 不含。
 set -euo pipefail
 
 TAG="${1:-}"
@@ -30,15 +31,32 @@ if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 VERSION="${TAG#v}"
 
-# ---- 2. 版本号一致性 -------------------------------------------------------
+# ---- 2. 版本号：与 tag 不一致时自动改写 CMakeLists ---------------------------
 # deb 的版本由 CMake 的 project(VERSION) 决定，tag 只是个标签。两者一旦不同步，
-# Release 上就会出现「tag 叫 v1.2.0、包却是 1.0.0-1」这种事故，必须拦住。
-CMAKE_VER="$(sed -n '/^project(/,/)/p' npp-linux/CMakeLists.txt \
+# Release 上就会出现「tag 叫 v1.2.0、包却是 1.0.0-1」这种事故。
+# 这里直接改文件而不是报错让用户返工；提交与推送在第 4 步做（必须先到远端，
+# tag 才能指向含正确版本号的 commit）。
+CMAKE_FILE="npp-linux/CMakeLists.txt"
+CMAKE_VER="$(sed -n '/^project(/,/)/p' "$CMAKE_FILE" \
     | grep -oE 'VERSION +[0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $2}')"
-if [[ "$CMAKE_VER" != "$VERSION" ]]; then
-    echo "错误: tag ${TAG} 与 CMakeLists 的 VERSION ${CMAKE_VER:-<未找到>} 不一致" >&2
-    echo "      先改 npp-linux/CMakeLists.txt 里的 VERSION 为 ${VERSION} 并提交" >&2
+if [[ -z "$CMAKE_VER" ]]; then
+    echo "错误: 在 ${CMAKE_FILE} 的 project(...) 里找不到 VERSION x.y.z" >&2
     exit 1
+fi
+VERSION_BUMPED=0
+if [[ "$CMAKE_VER" != "$VERSION" ]]; then
+    echo ">>> CMakeLists 版本 ${CMAKE_VER} → ${VERSION}（自动改写）"
+    # 限定在 project(...) 块内替换，避免误伤 CPACK_PACKAGE_VERSION 之类的引用。
+    # 整行重写而不是只换版本号数字：sed 的替换串里 \1 后面紧跟数字会被当成
+    # 第 11 个反向引用（\11），而版本号恰好以数字开头。
+    sed -i "/^project(/,/)/ s/^\([[:space:]]*\)VERSION[[:space:]].*/\1VERSION ${VERSION}/" "$CMAKE_FILE"
+    CMAKE_VER="$(sed -n '/^project(/,/)/p' "$CMAKE_FILE" \
+        | grep -oE 'VERSION +[0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $2}')"
+    if [[ "$CMAKE_VER" != "$VERSION" ]]; then
+        echo "错误: 改写 ${CMAKE_FILE} 失败，当前仍为 ${CMAKE_VER:-<未找到>}" >&2
+        exit 1
+    fi
+    VERSION_BUMPED=1
 fi
 
 # ---- 3. 解析 Gitee 仓库 ----------------------------------------------------
@@ -58,11 +76,40 @@ echo ">>> 仓库: ${OWNER}/${REPO}    tag: ${TAG}"
 # git tag -a 会重复创建并导致 push 被拒。拉下来之后第 5 步就能识别成“已存在”。
 git fetch -q origin --tags 2>/dev/null || true
 
+# 第 2 步自动改写过的版本号要落地成提交并推到远端：否则 tag 指向的 commit 里
+# 还是旧版本号，Release 页下载的源码与 deb 对不上。
+if [[ $VERSION_BUMPED -eq 1 ]]; then
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo ">>> [dry-run] 版本号已改写但未提交（正式发版时会自动提交并推送）"
+    elif git diff --quiet HEAD -- "$CMAKE_FILE"; then
+        # 改写后的内容与 HEAD 一致（比如 HEAD 已经是目标版本，只是工作区被手改回旧值）：
+        # 没有差异就不提交，否则 git commit 会因 nothing to commit 直接退出。
+        echo ">>> 版本号与 HEAD 一致，无需提交"
+    else
+        git add "$CMAKE_FILE"
+        git commit -q -m "CMakeLists VERSION 升至 ${VERSION}（发布 ${TAG}）"
+        echo ">>> 已提交版本号改动"
+    fi
+fi
+
+# 工作区若还有别的不提交改动，deb 会包含它们而 tag 不含 —— 提醒但不阻断，
+# 因为从脏工作区打出一个包含本地修复的包有时是故意的。
+if [[ -n "$(git status --porcelain)" ]]; then
+    echo "警告: 工作区还有未提交的改动，deb 会包含它们，但 tag 指向的源码不含：" >&2
+    git status --short | sed 's/^/      /' >&2
+fi
+
 # 本地不能有未推送的提交：否则 tag 指向的 commit 在远端不存在，Release 挂上去打不开。
 if [[ -n "$(git log origin/master..HEAD --oneline 2>/dev/null)" ]]; then
-    echo "错误: 存在尚未推送的提交，请先 git push origin master" >&2
-    git log origin/master..HEAD --oneline | sed 's/^/      /' >&2
-    exit 1
+    if [[ $VERSION_BUMPED -eq 1 ]]; then
+        echo ">>> 推送版本号提交..."
+        git push -q origin master
+    fi
+    if [[ -n "$(git log origin/master..HEAD --oneline 2>/dev/null)" ]]; then
+        echo "错误: 存在尚未推送的提交，请先 git push origin master" >&2
+        git log origin/master..HEAD --oneline | sed 's/^/      /' >&2
+        exit 1
+    fi
 fi
 
 # ---- 5. 打 tag -------------------------------------------------------------
@@ -91,6 +138,10 @@ fi
 echo ">>> 产物: ${DEB_NAME} ($(du -h "$DEB" | cut -f1))"
 
 if [[ $DRY_RUN -eq 1 ]]; then
+    if [[ $VERSION_BUMPED -eq 1 ]]; then
+        echo ">>> 注意: CMakeLists 的 VERSION 已改为 ${VERSION}，但 dry-run 不改 git 历史，"
+        echo "    这份改动留在工作区里，正式发版时会自动提交并推送"
+    fi
     echo ">>> --dry-run：跳过推送与 Release 上传，以上校验全部通过"
     exit 0
 fi

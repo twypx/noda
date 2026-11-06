@@ -18,7 +18,8 @@ struct SessionFile {
     int caretPos{0};      // 光标字节位置
     int selStart{-1};     // 选区起点，-1 表示无选区
     int selEnd{-1};       // 选区终点
-    int firstVisibleLine{0};
+    int firstVisibleLine{0}; // 首个可见行的“文档行号”（还没换行折行之前的行号）
+    int xOffset{0};       // 横向滚动偏移（只在关闭自动换行时有意义），缺了它重开后会只看到一行的后半截
     int eolMode{2};       // Scintilla 的 SC_EOL_*：0=CRLF 1=CR 2=LF（默认 LF）
     int newDocIndex{0};   // 未命名文档的编号（标签上显示 "new N"）
     bool readOnly{false};

@@ -53,6 +53,7 @@ bool parseSessionFile(const QString& source, QVector<SessionFile>& files, int& a
                     f.lang = a.value(QStringLiteral("lang")).toString();
                     f.encoding = a.value(QStringLiteral("encoding")).toString();
                     f.firstVisibleLine = a.value(QStringLiteral("firstVisibleLine")).toInt();
+                    f.xOffset = a.value(QStringLiteral("xOffset")).toInt();
                     // toInt() 的第一个参数是 bool*，不能直接传 -1；缺属性时按“无选区”处理。
                     const QString startStr = a.value(QStringLiteral("startPos")).toString();
                     const QString endStr = a.value(QStringLiteral("endPos")).toString();
@@ -155,6 +156,7 @@ bool SessionManager::write(const QVector<SessionFile>& files, int activeIndex) {
     for (const SessionFile& f : files) {
         w.writeStartElement(QStringLiteral("File"));
         w.writeAttribute(QStringLiteral("firstVisibleLine"), QString::number(f.firstVisibleLine));
+        w.writeAttribute(QStringLiteral("xOffset"), QString::number(f.xOffset));
         w.writeAttribute(QStringLiteral("startPos"), QString::number(f.selStart >= 0 ? f.selStart : f.caretPos));
         w.writeAttribute(QStringLiteral("endPos"), QString::number(f.selEnd >= 0 ? f.selEnd : f.caretPos));
         w.writeAttribute(QStringLiteral("lang"), f.lang);

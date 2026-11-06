@@ -139,6 +139,9 @@ tools/register_open_with.py --remove    # 撤销
   自动回退读这份备份，一次坏写不会让会话永久丢失。
 - 恢复出来的内容不进撤销栈（否则一次 Ctrl+Z 就回到空文档），但仍带「已修改」标记，
   保存一次即可清掉。
+- 光标、选区、首个可见行和**横向滚动偏移**都会一起还原。还原时不能调 `SCI_SCROLLCARET`：
+  它会把光标强行滚进视野，重算横向偏移，长行一重开就只剩后半截（上游同样避开它，
+  改用 `SETANCHOR`/`SETCURRENTPOS` + `SETXOFFSET`）。
 
 开关在 **设置 → 首选项 → 会话与备份**：「记住上次打开的会话」控制 `session.xml`，
 「定时备份未保存内容」控制 `backup/` 与退出时不弹保存框，两者都可单独关闭。
@@ -150,19 +153,24 @@ export GITEE_TOKEN=xxxxxxxx   # Gitee 私人令牌，勾选 projects 权限
 tools/release.sh v1.0.0
 ```
 
-脚本依次完成：校验 tag 与 CMake 版本号一致 → 打 annotated tag → 全量构建 deb → 推送 tag →
+脚本依次完成：对齐版本号 → 打 annotated tag → 全量构建 deb → 推送 tag →
 调 Gitee API 建 Release → 上传 deb 附件。Release 说明文字自动取上一个 tag 以来的提交标题。
 
-发版前必须先把 `CMakeLists.txt` 里 `project(... VERSION x.y.z)` 改成与 tag 相同的版本 ——
-**deb 的版本号来自这里而不是 tag**，不同步就会出现「tag 叫 v1.2.0、包却是 1.0.0-1」的事故。
-脚本会提前拦住，并在打包完成后再拿 `dpkg-deb -f` 核对一次实际产物版本。
+**版本号不用手动改**：`CMakeLists.txt` 里 `project(... VERSION x.y.z)` 与 tag 不一致时，
+脚本会自动改写成 tag 的版本号，并把这个改动单独提交、推送 —— 因为 **deb 的版本号来自这里而不是 tag**，
+同步之后才不会再出现「tag 叫 v1.2.0、包却是 1.0.0-1」的事故。打包完成后还会拿
+`dpkg-deb -f` 核对一次实际产物版本。
 
 它还会拦住两种容易出错的情况：
 
 - 有未推送的提交 —— 否则 tag 指向的 commit 在远端不存在，Release 挂上去打不开。
 - `origin` 不是 Gitee 仓库（在带 GitHub 上游 remote 的源码树里跑会直接拒绝）。
 
-只想检查不发布：`tools/release.sh v1.0.0 --dry-run`（不建 tag、不推送、不上传，仍会构建出 deb）。
+如果工作区还有**其他**未提交改动，脚本只警告不阻断：deb 从工作区构建、会包含它们，
+而 tag 指向的源码不含，两者会有差异。
+
+只想检查不发布：`tools/release.sh v1.0.1 --dry-run`（不建 tag、不推送、不上传，仍会构建出 deb）。
+dry-run 下自动改写的版本号会留在工作区但不提交，正式发版时再一并提交、推送。
 
 令牌在 <https://gitee.com/profile/personal_access_tokens> 生成，只需 `projects` 权限。
 

@@ -39,7 +39,9 @@ public:
     // 这些由调用方按 session.xml 里记录的值回填，才能保证下次保存仍按原编码写回。
     std::string currentTextUtf8() const;
     void setTextFromUtf8(const std::string& utf8);
-    void restoreViewState(int caretPos, int selStart, int selEnd, int firstVisibleLine);
+    // 还原上次的光标/选区/滚动位置。firstDocLine 是折行前的文档行号，
+    // xOffset 是横向滚动偏移（非自动换行时生效）。
+    void restoreViewState(int caretPos, int selStart, int selEnd, int firstDocLine, int xOffset);
 
     // 应用“全局样式配置器”里的默认前景/背景色覆盖（-1 表示不覆盖）。
     void applyGlobalStyleOverride(int fg, int bg);

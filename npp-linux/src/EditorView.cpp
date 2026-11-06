@@ -381,7 +381,8 @@ void EditorView::setTextFromUtf8(const std::string& utf8) {
     updateLineNumberMarginWidth();
 }
 
-void EditorView::restoreViewState(int caretPos, int selStart, int selEnd, int firstVisibleLine) {
+void EditorView::restoreViewState(int caretPos, int selStart, int selEnd,
+                                  int firstDocLine, int xOffset) {
     const sptr_t len = send(SCI_GETLENGTH);
     // session.xml 里的位置来自上一次运行，文件可能已被外部改小，必须先夹到合法区间。
     auto clampPos = [len](int pos) -> sptr_t {
@@ -392,15 +393,32 @@ void EditorView::restoreViewState(int caretPos, int selStart, int selEnd, int fi
     const sptr_t caret = clampPos(caretPos);
     const sptr_t selFrom = clampPos(selStart);
     const sptr_t selTo = clampPos(selEnd);
+
+    // 关键：用 SETANCHOR/SETCURRENTPOS 而不是 GOTOPOS/SETSEL。
+    // GOTOPOS 以及 SCI_SCROLLCARET 都会“把光标带进视野”，从而重算横向/纵向滚动位置，
+    // 把下面刚还原的 xOffset 和 firstVisibleLine 覆盖掉 —— 表现就是重开程序后
+    // 横向滚动条停在中间，一行只看得见后半截（上游 restoreCurrentPosPreStep 同样避开它们）。
     if (selFrom >= 0 && selTo >= 0 && selFrom != selTo) {
-        send(SCI_SETSEL, static_cast<uptr_t>(selFrom), selTo);
+        send(SCI_SETANCHOR, static_cast<uptr_t>(selFrom));
+        send(SCI_SETCURRENTPOS, selTo);
     } else {
-        send(SCI_GOTOPOS, static_cast<uptr_t>(caret < 0 ? 0 : caret));
+        const sptr_t pos = caret < 0 ? 0 : caret;
+        send(SCI_SETANCHOR, static_cast<uptr_t>(pos));
+        send(SCI_SETCURRENTPOS, pos);
     }
-    send(SCI_SCROLLCARET);
-    // 放在 SCROLLCARET 之后：否则滚动位置又会被“把光标带进视野”覆盖掉。
-    if (firstVisibleLine > 0) {
-        send(SCI_SETFIRSTVISIBLELINE, static_cast<uptr_t>(firstVisibleLine));
+    send(SCI_CANCEL); // 撤掉尚未执行的滚动/重绘
+
+    // 横向偏移只在关闭自动换行时有意义：开了换行就没有水平滚动条，
+    // 这时强行 SETXOFFSET 会在切回不换行时留下一个莫名其妙的偏移。
+    if (send(SCI_GETWRAPMODE) == SC_WRAP_NONE) {
+        send(SCI_SETXOFFSET, static_cast<uptr_t>(qMax(0, xOffset)));
+    }
+    send(SCI_CHOOSECARETX);
+
+    // session 里存的是“文档行号”，折行开启时要换算成可见行号才能定位到正确的屏幕行。
+    if (firstDocLine > 0) {
+        const auto visible = send(SCI_VISIBLEFROMDOCLINE, static_cast<uptr_t>(firstDocLine));
+        send(SCI_SETFIRSTVISIBLELINE, static_cast<uptr_t>(visible));
     }
 }
 
@@ -1670,7 +1688,12 @@ void EditorView::setShowIndentGuides(bool show) {
 }
 
 void EditorView::setWrapMode(bool wrap) {
-    send(SCI_SETWRAPMODE, wrap ? SC_WRAP_WORD : SC_WRAP_NONE);
+    const sptr_t target = wrap ? SC_WRAP_WORD : SC_WRAP_NONE;
+    // 值没变就别再发：SETWRAPMODE 会触发重排并丢掉当前滚动位置。
+    // 恢复会话后紧接着 applyPreferences 就会调到这里，不跳过的话
+    // 刚还原的 firstVisibleLine/xOffset 会被冲掉。
+    if (send(SCI_GETWRAPMODE) == target) return;
+    send(SCI_SETWRAPMODE, target);
 }
 
 DocSummary EditorView::getSummary() const {

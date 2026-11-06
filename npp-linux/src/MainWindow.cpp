@@ -1545,7 +1545,12 @@ SessionFile MainWindow::captureSessionFile(EditorView* ed) const {
         f.selStart = -1;
         f.selEnd = -1;
     }
-    f.firstVisibleLine = static_cast<int>(ed->send(SCI_GETFIRSTVISIBLELINE));
+    // 存“文档行号”而不是屏幕行号：开了自动换行时两者不同，换算后才不会错位。
+    f.firstVisibleLine = static_cast<int>(
+        ed->send(SCI_DOCLINEFROMVISIBLE, static_cast<uptr_t>(ed->send(SCI_GETFIRSTVISIBLELINE))));
+    // 横向滚动偏移必须一起存：否则重开时以光标为准，“把光标带进视野”会把长行滚到中间，
+    // 一行只看得见后半截（用户看到的就是“内容只恢复了一部分”）。
+    f.xOffset = static_cast<int>(ed->send(SCI_GETXOFFSET));
     // 用 Scintilla 的 EOL 取值而不是 DocumentBuffer 的枚举，恢复时能原样回填。
     f.eolMode = static_cast<int>(ed->send(SCI_GETEOLMODE));
     f.newDocIndex = buf->getNewDocIndex();
@@ -1688,7 +1693,7 @@ bool MainWindow::restoreSession() {
             if (!f.lang.isEmpty()) ed->applyLanguage(f.lang.toStdString());
         }
 
-        ed->restoreViewState(f.caretPos, f.selStart, f.selEnd, f.firstVisibleLine);
+        ed->restoreViewState(f.caretPos, f.selStart, f.selEnd, f.firstVisibleLine, f.xOffset);
         ed->setReadOnly(f.readOnly);
         if (restored == activeIndex) activeTab = _tabManager->indexOf(ed);
         ++restored;
