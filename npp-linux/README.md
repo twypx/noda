@@ -43,6 +43,39 @@ cd npp-linux
 ./build/notepad-plus-plus-linux
 ```
 
+## 打包成 deb
+
+```bash
+./build_deb.sh
+
+# 安装（用 apt 而不是 dpkg -i，缺依赖时会自动补齐）
+sudo apt install ./build-deb/notepad-plus-plus-linux_1.0.0-1_amd64.deb
+```
+
+产物为 `build-deb/notepad-plus-plus-linux_<版本>-1_<架构>.deb`（约 2.7 MB），按 Debian 政策装到标准位置：
+
+| 路径 | 内容 |
+|---|---|
+| `/usr/bin/notepad-plus-plus-linux` | 可执行文件 |
+| `/usr/share/notepad-plus-plus-linux/` | `langs.model.xml`、`stylers.model.xml` |
+| `/usr/share/applications/*.desktop` | 桌面入口，应用列表可直接搜到 |
+| `/usr/share/icons/hicolor/*/apps/` | 13 种尺寸图标 |
+| `/usr/share/doc/notepad-plus-plus-linux/copyright` | 许可声明 |
+
+卸载：`sudo apt remove notepad-plus-plus-linux`。
+
+几个打包细节（改 `CMakeLists.txt` 的 CPack 段前值得先看）：
+
+- **Depends 不手写**：由 `dpkg-shlibdeps` 按实际链接关系生成，所以在 Ubuntu 24.04 上拿到的是
+  `libqt6core6t64` 这类带 `t64` 后缀的包名，换发行版也不会写错。
+- **`Recommends: qt6-wayland`**：X11 的 `libqxcb.so` 就在 `libqt6gui6t64` 里，Wayland 会话用的
+  `libqwayland-*.so` 则单独放在 `qt6-wayland`，缺了它 Qt 只能退回 XWayland。
+- **必须用 `-DCMAKE_INSTALL_PREFIX=/usr`**：`.desktop` 里的 `Exec` 在 configure 阶段就被固化成
+  `${CMAKE_INSTALL_FULL_BINDIR}` 的绝对路径，沿用 CMake 默认的 `/usr/local` 会打出
+  `Exec=/usr/local/bin/...` 而文件实际装在 `/usr/bin`，装完点图标没反应。`build_deb.sh` 已处理。
+- **XML 装在 `share` 而不是 `bin`**：`main.cpp` 按 `applicationDirPath()/../share/notepad-plus-plus-linux`
+  相对推导，所以 `/usr`、`/usr/local`、甚至把 deb 解包到临时目录后直接运行都能命中，不依赖编译期绝对路径。
+
 ## 应用图标
 
 图标源文件为 `notepad++.png`（1024x1024 官方 logo），由 `tools/gen_icons.py`（Pillow）

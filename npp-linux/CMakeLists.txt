@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
-project(NotepadPlusPlus_Linux LANGUAGES CXX C)
+project(NotepadPlusPlus_Linux
+    VERSION 1.0.0
+    LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -166,13 +168,19 @@ target_link_libraries(notepad-plus-plus-linux PRIVATE
 
 message(STATUS "Notepad++ (Linux Port) CMake configuration ready.")
 
-# 安装规则：使 main.cpp 中 applicationDirPath() 相对定位能直接命中 XML，开箱即用
+# 包名/安装目录名。Debian 包名只允许小写字母、数字和连字符，这里同时用作
+# 图标名与 .desktop 文件名，三者必须一致 GNOME 才能把窗口关联到桌面入口。
+set(NPP_PKG_NAME "notepad-plus-plus-linux")
+
+# 安装规则：XML 装进 share 而非 bin（bin 下只放可执行文件）。main.cpp 通过
+# applicationDirPath()/../share/notepad-plus-plus-linux 相对定位，因此无论前缀是
+# /usr、/usr/local 还是解包到临时目录，都能命中，不依赖任何编译期绝对路径。
 include(GNUInstallDirs)
 install(TARGETS notepad-plus-plus-linux RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES
     "${POWEREDITOR_SRC}/langs.model.xml"
     "${POWEREDITOR_SRC}/stylers.model.xml"
-    DESTINATION ${CMAKE_INSTALL_BINDIR})
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/${NPP_PKG_NAME})
 
 # 应用图标与桌面入口：图标名与 .desktop 文件名一致，GNOME 才能把任务栏悬停提示关联到本窗口
 set(NPP_ICON_NAME "notepad-plus-plus-linux")
@@ -185,4 +193,55 @@ configure_file(resources/${NPP_ICON_NAME}.desktop.in
                ${CMAKE_CURRENT_BINARY_DIR}/${NPP_ICON_NAME}.desktop @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${NPP_ICON_NAME}.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+
+# Debian 规范要求 /usr/share/doc/<pkg>/copyright。不要指望 CPACK_RESOURCE_FILE_LICENSE
+# 自动把这个文件装进去 —— 实测 DEB 生成器并不落地，所以这里显式装一份。
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE"
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${NPP_PKG_NAME}
+            RENAME copyright)
+endif()
+
+# ---------------------------------------------------------------------------
+# Debian 打包（CPack DEB 生成器）
+#
+# 打包必须用 -DCMAKE_INSTALL_PREFIX=/usr 配置一次：上面 .desktop 里的 Exec 是
+# configure 阶段按 CMAKE_INSTALL_FULL_BINDIR 固化的绝对路径，若沿用默认前缀
+# /usr/local，打出来的包会写 Exec=/usr/local/bin/... 而文件实际装在 /usr/bin，
+# 装完点图标毫无反应。build_deb.sh 已按正确前缀调用。
+# ---------------------------------------------------------------------------
+set(CPACK_GENERATOR "DEB")
+set(CPACK_PACKAGE_NAME "${NPP_PKG_NAME}")
+set(CPACK_PACKAGE_VENDOR "twypx")
+set(CPACK_PACKAGE_CONTACT "twypx <twypx_1986@sina.com>")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "Notepad++ Linux port: native Qt6 Widgets editor with the Scintilla engine")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://gitee.com/twypx/notepad-plus-plus-linux")
+
+# 按 Debian 政策装到 /usr，而不是 CMake 默认的 /usr/local
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+set(CPACK_DEBIAN_PACKAGE_SECTION "editors")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_DEBIAN_PACKAGE_RELEASE "1")
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+
+# Depends 交给 dpkg-shlibdeps 按真实链接关系生成，不手写：Ubuntu 24.04 的 Qt6 包名
+# 带 t64 后缀（libqt6gui6t64 等），手写极容易在别的发行版上直接依赖不上。
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+# X11 的 libqxcb.so 就在 libqt6gui6t64 里，无需额外包；但 Wayland 会话用的
+# libqwayland-*.so 单独放在 qt6-wayland，缺了它 Qt 只能退回 XWayland。
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "qt6-wayland")
+
+# DEB 生成器会把这份许可文本装到 /usr/share/doc/<pkg>/copyright
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE")
+endif()
+
+# 安装/卸载后刷新图标缓存与 desktop 数据库：CPack 不像 debhelper 那样生成 dpkg
+# 触发器，不主动刷的话 GNOME 应用列表里可能一时看不到图标。
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/deb/postinst;${CMAKE_CURRENT_SOURCE_DIR}/resources/deb/postrm")
+
+include(CPack)
 

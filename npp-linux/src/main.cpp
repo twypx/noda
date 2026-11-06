@@ -28,9 +28,13 @@ int main(int argc, char* argv[]) {
     app.setDesktopFileName(QStringLiteral("notepad-plus-plus-linux"));
 
     // 载入 Notepad++ 语法与高亮样式配置 (多级智能探测)
+    // 第二项是安装后的位置：可执行文件在 <prefix>/bin，XML 在 <prefix>/share/notepad-plus-plus-linux。
+    // 用 ../share 相对推导而不是编译期绝对路径，这样 /usr、/usr/local 以及把 deb 解包到
+    // 临时目录后直接运行都能命中。
     QString appDir = QApplication::applicationDirPath();
     QStringList searchPaths = {
         appDir + "/langs.model.xml",
+        appDir + "/../share/notepad-plus-plus-linux/langs.model.xml",
         appDir + "/../../PowerEditor/src/langs.model.xml",
         appDir + "/../PowerEditor/src/langs.model.xml",
         "./PowerEditor/src/langs.model.xml",
@@ -48,6 +52,7 @@ int main(int argc, char* argv[]) {
     QString stylersPath;
     QStringList stylerSearchPaths = {
         appDir + "/stylers.model.xml",
+        appDir + "/../share/notepad-plus-plus-linux/stylers.model.xml",
         appDir + "/../../PowerEditor/src/stylers.model.xml",
         appDir + "/../PowerEditor/src/stylers.model.xml",
         "./PowerEditor/src/stylers.model.xml",
