@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Notepad++ (Linux)
+Name[zh_CN]=Notepad++ (Linux)
+GenericName=Text Editor
+GenericName[zh_CN]=文本编辑器
+Comment=Lightweight source/text editor with syntax highlighting
+Comment[zh_CN]=支持语法高亮的轻量级文本/源码编辑器
+Exec=@NPP_APP_EXE@
+TryExec=@NPP_APP_EXE@
+Icon=notepad-plus-plus-linux
+Terminal=false
+StartupNotify=true
+Categories=Utility;TextEditor;
+Keywords=editor;text;source;code;notepad;
+MimeType=text/plain;text/x-chdr;text/x-csrc;text/x-c++src;text/html;text/xml;text/css;text/javascript;

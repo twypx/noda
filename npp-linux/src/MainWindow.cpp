@@ -1,0 +1,1590 @@
+#include "MainWindow.h"
+#include "utils/ThemeManager.h"
+#include "utils/PrintHelper.h"
+#include "utils/ToolbarIcon.h"
+#include "widgets/TitleBar.h"
+#include <QStyleOption>
+#include <QPainter>
+#include <QVBoxLayout>
+#include <QSizeGrip>
+#include "StyleManager.h"
+#include <QMenuBar>
+#include <QToolBar>
+#include <QStatusBar>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QCloseEvent>
+#include <QApplication>
+#include <QClipboard>
+#include <QPalette>
+#include <QStyle>
+#include <QStyleFactory>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QProcess>
+#include <QDateTime>
+#include <QInputDialog>
+#include <QPrinter>
+#include <QPrintDialog>
+#include <vector>
+
+namespace {
+// 写盘期间临时解除对该路径的 inotify 监视，析构后恢复，避免自身保存触发“外部修改”假警报。
+class WatchGuard {
+public:
+    WatchGuard(QFileSystemWatcher* w, const QString& path)
+        : _w(w), _path(path), _removed(w && !path.isEmpty() && w->files().contains(path)) {
+        if (_removed) _w->removePath(_path);
+    }
+    ~WatchGuard() { if (_removed && _w) _w->addPath(_path); }
+    WatchGuard(const WatchGuard&) = delete;
+    WatchGuard& operator=(const WatchGuard&) = delete;
+private:
+    QFileSystemWatcher* _w;
+    QString _path;
+    bool _removed;
+};
+
+// 将首选项里的 defaultEOL 文本映射为枚举。
+LineEnding eolFromPref(const QString& s) {
+    if (s.contains("CRLF") || s.contains("Windows")) return LineEnding::CRLF;
+    if (s.contains("Macintosh") || s.contains("Mac") || s.compare("CR", Qt::CaseInsensitive) == 0) return LineEnding::CR;
+    return LineEnding::LF;
+}
+
+// 工具栏一项的声明：图标基名 + 中文提示 + 对应槽 + 快捷键（仅用于 tooltip 展示，
+// 真正的 shortcut 仍由菜单项持有，避免同一按键被两个 QAction 抢注产生歧义）。
+struct ToolEntry {
+    const char* icon;   // 空串表示一个分隔符
+    const char* text;
+    void (MainWindow::*slot)();
+    QKeySequence seq;
+};
+} // namespace
+
+struct LanguageItem {
+    QString id;
+    QString displayName;
+};
+
+static const std::map<char, std::vector<LanguageItem>> s_languageGroups = {
+    {'A', {{"actionscript", "ActionScript"}, {"ada", "Ada"}, {"asm", "Assembly"}, {"asn1", "ASN.1"}, {"asp", "ASP"}, {"autoit", "AutoIt"}}},
+    {'B', {{"bash", "Bash / Shell"}, {"batch", "Batch (批处理)"}, {"baanc", "BaanC"}, {"blitzbasic", "BlitzBasic"}}},
+    {'C', {{"c", "C"}, {"cpp", "C++"}, {"cs", "C#"}, {"cmake", "CMake"}, {"cobol", "COBOL"}, {"coffeescript", "CoffeeScript"}, {"css", "CSS"}, {"csound", "Csound"}}},
+    {'D', {{"d", "D"}, {"diff", "Diff"}}},
+    {'E', {{"erlang", "Erlang"}, {"escript", "ESCRIPT"}}},
+    {'F', {{"forth", "Forth"}, {"fortran", "Fortran (free form)"}, {"fortran77", "Fortran (fixed form)"}, {"freebasic", "FreeBasic"}}},
+    {'G', {{"go", "Go"}, {"gui4cli", "Gui4Cli"}}},
+    {'H', {{"haskell", "Haskell"}, {"html", "HTML"}}},
+    {'I', {{"ini", "INI file"}, {"inno", "Inno Setup"}, {"ihex", "Intel HEX"}}},
+    {'J', {{"java", "Java"}, {"javascript.js", "JavaScript"}, {"json", "JSON"}, {"jsp", "JSP"}}},
+    {'K', {{"kix", "KiXtart"}}},
+    {'L', {{"latex", "LaTeX"}, {"lisp", "Lisp"}, {"lua", "Lua"}}},
+    {'M', {{"makefile", "Makefile"}, {"markdown", "Markdown"}, {"matlab", "MATLAB"}}},
+    {'N', {{"nsis", "NSIS"}, {"nim", "Nim"}}},
+    {'O', {{"objc", "Objective-C"}, {"oscript", "OScript"}}},
+    {'P', {{"pascal", "Pascal"}, {"perl", "Perl"}, {"php", "PHP"}, {"postscript", "PostScript"}, {"powershell", "PowerShell"}, {"props", "Properties"}, {"purebasic", "PureBasic"}, {"python", "Python"}}},
+    {'R', {{"r", "R"}, {"rc", "Resource file (RC)"}, {"ruby", "Ruby"}, {"rust", "Rust"}}},
+    {'S', {{"sql", "SQL"}, {"swift", "Swift"}, {"smalltalk", "Smalltalk"}, {"scheme", "Scheme"}}},
+    {'T', {{"tcl", "TCL"}, {"tex", "TeX"}, {"toml", "TOML"}, {"typescript", "TypeScript"}}},
+    {'V', {{"vb", "Visual Basic"}, {"verilog", "Verilog"}, {"vhdl", "VHDL"}}},
+    {'X', {{"xml", "XML"}}},
+    {'Y', {{"yaml", "YAML"}}}
+};
+
+MainWindow::MainWindow(QWidget* parent)
+    : QMainWindow(parent)
+    , _tabManager(new TabManager(this))
+    , _findDialog(new FindReplaceDialog(this))
+    , _fileWatcher(new QFileSystemWatcher(this))
+{
+    setAttribute(Qt::WA_StyledBackground, true);
+    // 无边框窗口：标题栏由自绘 TitleBar 接管，因此深色/浅色下顶部颜色完全可控（不再跟随系统主题）。
+    setWindowFlag(Qt::FramelessWindowHint, true);
+    // 将菜单栏/工具栏/编辑区/状态栏整体内缩 1px，让 QMainWindow 的 1px 样式边框显露出来，
+    // 否则子控件会铺满并遮盖边框，叠在其他窗口上时看不到程序边界。
+    setContentsMargins(1, 1, 1, 1);
+    setCentralWidget(_tabManager);
+    setWindowTitle("Notepad++ (Linux)");
+    resize(1080, 780);
+
+    loadPreferences();
+
+    setupMenus();
+    setupTitleBar();
+    setupToolBar();
+    setupStatusBar();
+    loadRecentFiles();
+
+    connect(_tabManager, &TabManager::activeEditorChanged, this, &MainWindow::onActiveEditorChanged);
+    // 标签文本变化（保存/另存/重命名/修改标记）时，同步窗口标题——任务栏悬停提示读的就是它。
+    connect(_tabManager, &TabManager::tabTitleChanged, this, [this](int) {
+        syncWindowTitle();
+    });
+    connect(_tabManager, &TabManager::editorCreated, this, &MainWindow::applyPreferencesToEditor);
+    connect(_fileWatcher, &QFileSystemWatcher::fileChanged, this, &MainWindow::onFileChangedOnDisk);
+
+    auto* firstEd = _tabManager->createNewTab();
+    applyPreferences(_prefs);
+    if (firstEd) {
+        firstEd->applyDefaultDocFormat(eolFromPref(_prefs.defaultEOL), _prefs.defaultEncoding.toStdString());
+    }
+    reloadStyleOverrides();
+
+    ThemeManager::applyTheme(_prefs.darkMode);
+
+    if (_prefs.darkMode) {
+        onToggleDarkMode(true);
+    }
+}
+
+void MainWindow::setupMenus() {
+    menuBar()->setNativeMenuBar(false);
+    setupFileMenu();
+    setupEditMenu();
+    setupSearchMenu();
+    setupViewMenu();
+    setupEncodingMenu();
+    setupLanguageMenu();
+    setupSettingsMenu();
+}
+
+void MainWindow::setupTitleBar() {
+    // 无边框下用自绘标题栏替换系统标题栏，并把菜单栏嵌入标题栏同一行的左侧：
+    // 标题栏 = 左：应用图标 → 菜单栏 → 可拖动空白 → 右：最小化/最大化/关闭。
+    auto* header = new QWidget(this);
+    auto* hl = new QVBoxLayout(header);
+    hl->setContentsMargins(0, 0, 0, 0);
+    hl->setSpacing(0);
+
+    auto* tb = new TitleBar(header);
+    tb->insertMenuWidget(menuBar()); // 复用已构建的菜单栏，插到应用图标右侧
+    hl->addWidget(tb);
+
+    setMenuWidget(header);
+}
+
+void MainWindow::setupFileMenu() {
+    auto* menu = menuBar()->addMenu("文件(&F)");
+
+    menu->addAction("新建(&N)", QKeySequence::New, this, &MainWindow::onNewFile);
+    menu->addAction("打开(&O)...", QKeySequence::Open, this, &MainWindow::onOpenFile);
+
+    auto* openFolderMenu = menu->addMenu("打开所在文件夹(&F)");
+    openFolderMenu->addAction("在文件管理器中打开", this, &MainWindow::onOpenFolderInFileManager);
+    openFolderMenu->addAction("在终端中打开", this, &MainWindow::onOpenFolderInTerminal);
+
+    menu->addAction("重新载入文件(&L)", this, &MainWindow::onReloadFile);
+
+    menu->addSeparator();
+    menu->addAction("保存(&S)", QKeySequence::Save, this, &MainWindow::onSaveFile);
+    menu->addAction("另存为(&A)...", QKeySequence::SaveAs, this, &MainWindow::onSaveAsFile);
+    menu->addAction("拷贝另存为(&Y)...", this, &MainWindow::onSaveCopyAs);
+    auto* saveAllAct = menu->addAction("全部保存(&E)", this, &MainWindow::onSaveAllFiles);
+    saveAllAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+
+    menu->addAction("重命名(&R)...", this, &MainWindow::onRenameFile);
+    menu->addAction("从磁盘删除(&B)", this, &MainWindow::onDeleteFileFromDisk);
+
+    menu->addSeparator();
+    menu->addAction("关闭(&C)", QKeySequence::Close, this, &MainWindow::onCloseFile);
+
+    auto* closeMoreMenu = menu->addMenu("关闭多个文档(&M)");
+    auto* closeAllAct = closeMoreMenu->addAction("全部关闭(&E)", this, &MainWindow::onCloseAllFiles);
+    closeAllAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_W));
+    closeMoreMenu->addAction("关闭当前以外所有文件", this, &MainWindow::onCloseAllExceptCurrent);
+    closeMoreMenu->addAction("关闭左侧所有文件", this, &MainWindow::onCloseAllToLeft);
+    closeMoreMenu->addAction("关闭右侧所有文件", this, &MainWindow::onCloseAllToRight);
+    closeMoreMenu->addAction("关闭所有未修改的文件", this, &MainWindow::onCloseAllUnchanged);
+
+    auto* restoreAct = menu->addAction("恢复最近一个关闭的文件", this, &MainWindow::onRestoreClosedFile);
+    restoreAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_T));
+
+    menu->addAction("打印(&P)...", QKeySequence::Print, this, &MainWindow::onPrint);
+
+    menu->addSeparator();
+    _recentFilesMenu = menu->addMenu("近期文件(&R)");
+    updateRecentFilesMenu();
+
+    menu->addSeparator();
+    menu->addAction("退出(&X)", QKeySequence::Quit, this, &QWidget::close);
+}
+
+void MainWindow::setupEditMenu() {
+    auto* menu = menuBar()->addMenu("编辑(&E)");
+
+    menu->addAction("撤销(&U)", QKeySequence::Undo, this, &MainWindow::onUndo);
+    menu->addAction("恢复(&R)", QKeySequence::Redo, this, &MainWindow::onRedo);
+
+    menu->addSeparator();
+    menu->addAction("剪切(&T)", QKeySequence::Cut, this, &MainWindow::onCut);
+    menu->addAction("复制(&C)", QKeySequence::Copy, this, &MainWindow::onCopy);
+    menu->addAction("粘贴(&P)", QKeySequence::Paste, this, &MainWindow::onPaste);
+    menu->addAction("删除(&D)", QKeySequence::Delete, this, &MainWindow::onDelete);
+    menu->addAction("全选(&A)", QKeySequence::SelectAll, this, &MainWindow::onSelectAll);
+
+    // “两点定块”：先把光标放在起点执行一次，再移到终点执行一次，中间用普通移动光标即可。
+    // 两条命令只差选取模式，菜单里成对出现（同 Notepad++）。
+    menu->addAction("开始/结束 选取(&S)", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_B), this,
+                    [this]() { onBeginEndSelect(false); });
+    menu->addAction("开始/结束 按列选取", QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_B), this,
+                    [this]() { onBeginEndSelect(true); });
+
+    menu->addSeparator();
+    auto* insertMenu = menu->addMenu("插入");
+    insertMenu->addAction("日期时间 (短)", [this]() { onInsertDateTime(false); });
+    insertMenu->addAction("日期时间 (长)", [this]() { onInsertDateTime(true); });
+
+    auto* copyMenu = menu->addMenu("复制到剪贴板(&Y)");
+    copyMenu->addAction("复制当前文件路径", this, &MainWindow::onCopyFilePath);
+    copyMenu->addAction("复制当前文件名", this, &MainWindow::onCopyFileName);
+    copyMenu->addAction("复制当前目录路径", this, &MainWindow::onCopyDir);
+    copyMenu->addAction("复制所有文件名", this, &MainWindow::onCopyAllFileNames);
+    copyMenu->addAction("复制所有文件路径", this, &MainWindow::onCopyAllFilePaths);
+
+    auto* indentMenu = menu->addMenu("缩进(&I)");
+    indentMenu->addAction("增加缩进 (Tab)", this, &MainWindow::onIndent);
+    indentMenu->addAction("减少缩进 (Shift+Tab)", this, &MainWindow::onUnindent);
+
+    auto* caseMenu = menu->addMenu("转换大小写(&V)");
+    auto* upperAct = caseMenu->addAction("转成大写(&U)", this, &MainWindow::onToUpperCase);
+    upperAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_U));
+    auto* lowerAct = caseMenu->addAction("转成小写(&L)", this, &MainWindow::onToLowerCase);
+    lowerAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_U));
+    caseMenu->addAction("每词首字母大写(&P)", this, &MainWindow::onToTitleCase);
+    caseMenu->addAction("大小写互换(&I)", this, &MainWindow::onInvertCase);
+
+    auto* lineMenu = menu->addMenu("行操作(&L)");
+    auto* dupLineAct = lineMenu->addAction("重复当前行", this, &MainWindow::onDuplicateCurrentLine);
+    dupLineAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_D));
+    auto* delLineAct = lineMenu->addAction("删除当前行", this, &MainWindow::onDeleteCurrentLine);
+    delLineAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
+    auto* moveUpAct = lineMenu->addAction("向上移动当前行", this, &MainWindow::onMoveLineUp);
+    moveUpAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Up));
+    auto* moveDownAct = lineMenu->addAction("向下移动当前行", this, &MainWindow::onMoveLineDown);
+    moveDownAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Down));
+    auto* joinAct = lineMenu->addAction("合并行", this, &MainWindow::onJoinLines);
+    joinAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_J));
+    lineMenu->addAction("拆分行", this, &MainWindow::onSplitLines);
+    lineMenu->addSeparator();
+    lineMenu->addAction("升序排列文本行", [this]() { onSortLines(true, false); });
+    lineMenu->addAction("降序排列文本行", [this]() { onSortLines(false, false); });
+    lineMenu->addAction("升序排列文本行(忽略大小写)", [this]() { onSortLines(true, true); });
+    lineMenu->addAction("降序排列文本行(忽略大小写)", [this]() { onSortLines(false, true); });
+    lineMenu->addAction("删除重复行", this, &MainWindow::onRemoveDuplicateLines);
+    lineMenu->addAction("逆序排列行", this, &MainWindow::onReverseLines);
+    lineMenu->addSeparator();
+    auto* insAboveAct = lineMenu->addAction("在当前行上方插入空行", [this]() { onInsertEmptyLine(true); });
+    insAboveAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Return));
+    auto* insBelowAct = lineMenu->addAction("在当前行下方插入空行", [this]() { onInsertEmptyLine(false); });
+    insBelowAct->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Return));
+
+    auto* commentMenu = menu->addMenu("注释/取消注释(&M)");
+    auto* lineCommentAct = commentMenu->addAction("单行注释/取消注释", this, &MainWindow::onToggleLineComment);
+    lineCommentAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Slash));
+    auto* blockCommentAct = commentMenu->addAction("区块注释", this, &MainWindow::onBlockComment);
+    blockCommentAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Q));
+    commentMenu->addAction("清除区块注释", this, &MainWindow::onUnblockComment);
+
+    auto* blankMenu = menu->addMenu("空白字符操作(&B)");
+    blankMenu->addAction("移除行尾空格", this, &MainWindow::onTrimTrailingSpaces);
+    blankMenu->addAction("移除行首空格", this, &MainWindow::onTrimLeadingSpaces);
+    blankMenu->addAction("移除行首和行尾空格", this, &MainWindow::onTrimBoth);
+    blankMenu->addAction("TAB 转空格", this, &MainWindow::onTabsToSpaces);
+    blankMenu->addAction("空格转 TAB", this, &MainWindow::onSpacesToTabs);
+    blankMenu->addSeparator();
+    blankMenu->addAction("移除空行", [this]() { onRemoveEmptyLines(false); });
+    blankMenu->addAction("移除空行(包括空白字符)", [this]() { onRemoveEmptyLines(true); });
+
+    menu->addSeparator();
+    // 列选模式入口：前者只讲怎么进入列选，后者真正改写列内容。
+    menu->addAction("列选模式...", this, &MainWindow::onColumnModeTip);
+    menu->addAction("列编辑器(&N)...", QKeySequence(Qt::ALT | Qt::Key_C), this, &MainWindow::onColumnEditor);
+
+    menu->addSeparator();
+    _actReadOnly = menu->addAction("当前文件设为只读", this, &MainWindow::onToggleReadOnly);
+    _actReadOnly->setCheckable(true);
+}
+
+void MainWindow::setupSearchMenu() {
+    auto* menu = menuBar()->addMenu("搜索(&S)");
+
+    menu->addAction("查找(&F)...", QKeySequence::Find, this, &MainWindow::onFind);
+    auto* repAct = menu->addAction("替换(&R)...", this, &MainWindow::onReplace);
+    repAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_H));
+
+    auto* findNextAct = menu->addAction("查找下一个(&N)", this, &MainWindow::onFindNext);
+    findNextAct->setShortcut(QKeySequence(Qt::Key_F3));
+    auto* findPrevAct = menu->addAction("查找上一个(&P)", this, &MainWindow::onFindPrev);
+    findPrevAct->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F3));
+
+    auto* qFindNextAct = menu->addAction("快速查找下一个(&V)", this, &MainWindow::onQuickFindNext);
+    qFindNextAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_F3));
+    auto* qFindPrevAct = menu->addAction("快速查找上一个(&V)", this, &MainWindow::onQuickFindPrev);
+    qFindPrevAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F3));
+
+    auto* gotoAct = menu->addAction("定位/跳转行(&G)...", this, &MainWindow::onGoToLine);
+    gotoAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_G));
+
+    menu->addSeparator();
+    auto* braceAct = menu->addAction("转到匹配的括号(&M)", this, &MainWindow::onGoToMatchingBrace);
+    braceAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_B));
+    auto* selBraceAct = menu->addAction("选中匹配括号之间的所有字符(&E)", this, &MainWindow::onSelectToMatchingBrace);
+    selBraceAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_B));
+
+    menu->addSeparator();
+    auto* bookmarkMenu = menu->addMenu("书签(&B)");
+    auto* toggleBmAct = bookmarkMenu->addAction("切换书签", this, &MainWindow::onToggleBookmark);
+    toggleBmAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_F2));
+    auto* nextBmAct = bookmarkMenu->addAction("下一个书签", this, &MainWindow::onNextBookmark);
+    nextBmAct->setShortcut(QKeySequence(Qt::Key_F2));
+    auto* prevBmAct = bookmarkMenu->addAction("上一个书签", this, &MainWindow::onPrevBookmark);
+    prevBmAct->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F2));
+    bookmarkMenu->addSeparator();
+    bookmarkMenu->addAction("清除所有书签", this, &MainWindow::onClearAllBookmarks);
+    bookmarkMenu->addAction("复制书签行", this, &MainWindow::onCopyBookmarkedLines);
+    bookmarkMenu->addAction("剪切书签行", this, &MainWindow::onCutBookmarkedLines);
+    bookmarkMenu->addAction("删除书签行", this, &MainWindow::onDeleteBookmarkedLines);
+    bookmarkMenu->addAction("删除未标记书签行", this, &MainWindow::onDeleteNonBookmarkedLines);
+    bookmarkMenu->addAction("反向标记书签", this, &MainWindow::onInverseBookmarks);
+
+    auto* markMenu = menu->addMenu("用格式标记选中文本(&A)");
+    for (int k = 1; k <= 5; ++k) {
+        markMenu->addAction(QString("使用格式 %1").arg(k), [this, k]() { onMarkText(k); });
+    }
+    markMenu->addSeparator();
+    markMenu->addAction("清除所有格式标记", this, &MainWindow::onClearMarks);
+}
+
+void MainWindow::setupViewMenu() {
+    auto* menu = menuBar()->addMenu("视图(&V)");
+
+    auto* fsAct = menu->addAction("全屏模式", this, &MainWindow::onToggleFullScreen);
+    fsAct->setCheckable(true);
+    fsAct->setShortcut(QKeySequence(Qt::Key_F11));
+
+    _actAlwaysOnTop = menu->addAction("总在最前", this, &MainWindow::onToggleAlwaysOnTop);
+    _actAlwaysOnTop->setCheckable(true);
+
+    _actWrap = menu->addAction("自动换行", this, &MainWindow::onToggleWordWrap);
+    _actWrap->setCheckable(true);
+
+    auto* symMenu = menu->addMenu("显示符号");
+    _actShowWs = symMenu->addAction("显示空格与制表符", this, &MainWindow::onToggleShowWhitespace);
+    _actShowWs->setCheckable(true);
+    _actShowEol = symMenu->addAction("显示换行符", this, &MainWindow::onToggleShowEOL);
+    _actShowEol->setCheckable(true);
+    _actShowAll = symMenu->addAction("显示所有字符", this, &MainWindow::onToggleShowAllChars);
+    _actShowAll->setCheckable(true);
+    _actShowGuides = symMenu->addAction("显示缩进参考线", this, &MainWindow::onToggleShowIndentGuides);
+    _actShowGuides->setCheckable(true);
+
+    // "显示所有字符"是前两个开关的合体：单独改动任一个时，它只在两者都开时才保持勾选。
+    auto syncShowAll = [this]() {
+        if (_actShowAll) _actShowAll->setChecked(_actShowWs->isChecked() && _actShowEol->isChecked());
+    };
+    connect(_actShowWs, &QAction::toggled, this, syncShowAll);
+    connect(_actShowEol, &QAction::toggled, this, syncShowAll);
+
+    auto* zoomMenu = menu->addMenu("缩放");
+    auto* zoomInAct = zoomMenu->addAction("放大(&I)", this, &MainWindow::onZoomIn);
+    zoomInAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Equal));
+    auto* zoomOutAct = zoomMenu->addAction("缩小(&O)", this, &MainWindow::onZoomOut);
+    zoomOutAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Minus));
+    auto* zoomResetAct = zoomMenu->addAction("恢复默认缩放", this, &MainWindow::onZoomReset);
+    zoomResetAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_0));
+
+    auto* foldMenu = menu->addMenu("折叠层次");
+    auto* foldCurAct = foldMenu->addAction("折叠当前层次", this, &MainWindow::onFoldCurrent);
+    foldCurAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_F));
+    auto* unfoldCurAct = foldMenu->addAction("展开当前层次", this, &MainWindow::onUnfoldCurrent);
+    unfoldCurAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_F));
+    auto* foldAllAct = foldMenu->addAction("折叠所有层次", this, &MainWindow::onFoldAll);
+    foldAllAct->setShortcut(QKeySequence(Qt::ALT | Qt::Key_0));
+    auto* unfoldAllAct = foldMenu->addAction("展开所有层次", this, &MainWindow::onUnfoldAll);
+    unfoldAllAct->setShortcut(QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_0));
+    foldMenu->addSeparator();
+    for (int lvl = 1; lvl <= 8; ++lvl) {
+        foldMenu->addAction(QString("折叠层次 %1").arg(lvl), [this, lvl]() { onFoldLevel(lvl); });
+    }
+
+    auto* tabNavMenu = menu->addMenu("标签页");
+    auto* nextTabAct = tabNavMenu->addAction("下个标签页", this, &MainWindow::onNextTab);
+    nextTabAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_PageDown));
+    auto* prevTabAct = tabNavMenu->addAction("上个标签页", this, &MainWindow::onPrevTab);
+    prevTabAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_PageUp));
+    auto* firstTabAct = tabNavMenu->addAction("首个标签页", this, &MainWindow::onFirstTab);
+    firstTabAct->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Home));
+    auto* lastTabAct = tabNavMenu->addAction("末尾标签页", this, &MainWindow::onLastTab);
+    lastTabAct->setShortcut(QKeySequence(Qt::ALT | Qt::Key_End));
+    tabNavMenu->addSeparator();
+    auto* moveLeftAct = tabNavMenu->addAction("前移标签页", this, &MainWindow::onMoveTabLeft);
+    moveLeftAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_PageUp));
+    auto* moveRightAct = tabNavMenu->addAction("后移标签页", this, &MainWindow::onMoveTabRight);
+    moveRightAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_PageDown));
+
+    menu->addSeparator();
+    menu->addAction("摘要信息 / 统计信息...", this, &MainWindow::onShowDocSummary);
+
+    _actDarkMode = menu->addAction("深色模式 (Dark Mode)", this, &MainWindow::onToggleDarkMode);
+    _actDarkMode->setCheckable(true);
+}
+
+void MainWindow::setupEncodingMenu() {
+    auto* menu = menuBar()->addMenu("编码(&N)");
+
+    _encodingGroup = new QActionGroup(this);
+    _encodingGroup->setExclusive(true);
+
+    QStringList encs = {"ANSI", "UTF-8", "UTF-8 BOM", "UTF-16 BE BOM", "UTF-16 LE BOM"};
+    for (const auto& enc : encs) {
+        auto* act = menu->addAction(enc);
+        act->setCheckable(true);
+        act->setData(enc);
+        _encodingGroup->addAction(act);
+        _encodingActionMap[enc] = act;
+        connect(act, &QAction::triggered, this, [this, enc]() { onSetEncoding(enc); });
+    }
+
+    auto* csMenu = menu->addMenu("字符集");
+    auto addCharset = [this, csMenu](const QString& title, const QStringList& list) {
+        auto* sub = csMenu->addMenu(title);
+        for (const auto& enc : list) {
+            auto* act = sub->addAction(enc);
+            act->setCheckable(true);
+            act->setData(enc);
+            _encodingGroup->addAction(act);
+            _encodingActionMap[enc] = act;
+            connect(act, &QAction::triggered, this, [this, enc]() { onSetEncoding(enc); });
+        }
+    };
+
+    addCharset("中文", {"GB2312", "GBK", "GB18030", "Big5"});
+    addCharset("西欧", {"ISO-8859-1", "Windows-1252"});
+    addCharset("日文", {"Shift-JIS", "EUC-JP"});
+    addCharset("韩文", {"EUC-KR"});
+    addCharset("西里尔文", {"Windows-1251"});
+
+    menu->addSeparator();
+    auto* convMenu = menu->addMenu("转为编码");
+    convMenu->addAction("转为 ANSI 编码", [this]() { onConvertToEncoding("ANSI"); });
+    convMenu->addAction("转为 UTF-8 编码", [this]() { onConvertToEncoding("UTF-8"); });
+    convMenu->addAction("转为 UTF-8 BOM 编码", [this]() { onConvertToEncoding("UTF-8 BOM"); });
+    convMenu->addAction("转为 UTF-16 BE BOM 编码", [this]() { onConvertToEncoding("UTF-16BE"); });
+    convMenu->addAction("转为 UTF-16 LE BOM 编码", [this]() { onConvertToEncoding("UTF-16LE"); });
+
+    menu->addSeparator();
+    auto* eolMenu = menu->addMenu("文档格式转换 (换行符)");
+    eolMenu->addAction("转为 Windows 格式 (CR LF)", [this]() { onConvertLineEnding(LineEnding::CRLF); });
+    eolMenu->addAction("转为 Unix 格式 (LF)", [this]() { onConvertLineEnding(LineEnding::LF); });
+    eolMenu->addAction("转为 Macintosh 格式 (CR)", [this]() { onConvertLineEnding(LineEnding::CR); });
+}
+
+void MainWindow::setupLanguageMenu() {
+    auto* langMenu = menuBar()->addMenu("语言(&L)");
+    _langActionGroup = new QActionGroup(this);
+    _langActionGroup->setExclusive(true);
+
+    auto* normalAct = langMenu->addAction("纯文本 (Normal Text)");
+    normalAct->setCheckable(true);
+    normalAct->setChecked(true);
+    normalAct->setData("normal");
+    _langActionGroup->addAction(normalAct);
+    _langActionMap["normal"] = normalAct;
+    connect(normalAct, &QAction::triggered, this, [this]() { setLanguage("normal"); });
+
+    langMenu->addSeparator();
+
+    for (const auto& [letter, items] : s_languageGroups) {
+        auto* subMenu = langMenu->addMenu(QString(letter));
+        for (const auto& item : items) {
+            auto* act = subMenu->addAction(item.displayName);
+            act->setCheckable(true);
+            act->setData(item.id);
+            _langActionGroup->addAction(act);
+            _langActionMap[item.id] = act;
+            connect(act, &QAction::triggered, this, [this, id = item.id]() { setLanguage(id); });
+        }
+    }
+
+    if (_langActionMap.count("javascript.js")) {
+        _langActionMap["javascript"] = _langActionMap["javascript.js"];
+    }
+
+    connect(_langActionGroup, &QActionGroup::triggered, this, &MainWindow::onLanguageActionTriggered);
+}
+
+void MainWindow::setupSettingsMenu() {
+    auto* menu = menuBar()->addMenu("设置(&T)");
+    menu->addAction("首选项(&P)...", this, &MainWindow::onPreferences);
+    menu->addAction("语言样式配置器(&S)...", this, &MainWindow::onStyleConfigurator);
+    menu->addAction("快捷键一览(&K)...", this, &MainWindow::onShortcutsMapper);
+}
+
+void MainWindow::setupToolBar() {
+    _toolBar = addToolBar("主工具栏");
+    _toolBar->setMovable(false);
+    _toolBar->setIconSize(QSize(16, 16));
+
+    const QVector<ToolEntry> entries = {
+        {"file-plus",       "新建",     &MainWindow::onNewFile,        QKeySequence::New},
+        {"folder-open",     "打开",     &MainWindow::onOpenFile,       QKeySequence::Open},
+        {"save",            "保存",     &MainWindow::onSaveFile,       QKeySequence::Save},
+        {"save-all",        "全部保存",  &MainWindow::onSaveAllFiles,   QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S)},
+        {"x",               "关闭",     &MainWindow::onCloseFile,      QKeySequence::Close},
+        {"list-x",          "全部关闭",  &MainWindow::onCloseAllFiles,  QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_W)},
+        {"printer",         "打印",     &MainWindow::onPrint,          QKeySequence::Print},
+        {"",                "",         nullptr,                       QKeySequence()},
+        {"scissors",        "剪切",     &MainWindow::onCut,            QKeySequence::Cut},
+        {"copy",            "复制",     &MainWindow::onCopy,           QKeySequence::Copy},
+        {"clipboard-paste", "粘贴",     &MainWindow::onPaste,          QKeySequence::Paste},
+        {"",                "",         nullptr,                       QKeySequence()},
+        {"undo-2",          "撤销",     &MainWindow::onUndo,           QKeySequence::Undo},
+        {"redo-2",          "恢复",     &MainWindow::onRedo,           QKeySequence::Redo},
+        {"",                "",         nullptr,                       QKeySequence()},
+        {"search",          "查找",     &MainWindow::onFind,           QKeySequence::Find},
+        {"replace",         "替换",     &MainWindow::onReplace,        QKeySequence(Qt::CTRL | Qt::Key_H)},
+        {"",                "",         nullptr,                       QKeySequence()},
+        {"zoom-in",         "放大",     &MainWindow::onZoomIn,         QKeySequence(Qt::CTRL | Qt::Key_Equal)},
+        {"zoom-out",        "缩小",     &MainWindow::onZoomOut,        QKeySequence(Qt::CTRL | Qt::Key_Minus)},
+    };
+
+    // 开关型按钮（自动换行 / 显示所有字符 / 缩进参考线）与菜单里同名的 checkable 项共享状态：
+    // 两侧只持有各自的 QAction（否则图标会一并出现在菜单里），靠一对 toggled 连接保持勾选同步。
+    // setChecked 不会触发 triggered，因此不会把动作执行两遍。
+    auto addToggleTool = [this](const char* iconName, const QString& text,
+                                QAction* menuAct, void (MainWindow::*toggle)(bool)) {
+        QAction* act = _toolBar->addAction(text);
+        act->setCheckable(true);
+        if (menuAct) {
+            act->setChecked(menuAct->isChecked());
+            connect(act, &QAction::toggled, menuAct, &QAction::setChecked);
+            connect(menuAct, &QAction::toggled, act, &QAction::setChecked);
+        }
+        connect(act, &QAction::triggered, this, toggle);
+        const QString seqText = menuAct ? menuAct->shortcut().toString() : QString();
+        act->setToolTip(seqText.isEmpty() ? text : text + " (" + seqText + ")");
+        _toolActions.append(qMakePair(act, QString::fromLatin1(iconName)));
+    };
+
+    _toolActions.clear();
+    for (const auto& e : entries) {
+        if (!e.icon || !*e.icon) { // 分隔符
+            _toolBar->addSeparator();
+            continue;
+        }
+        const QString text = QString::fromUtf8(e.text);
+        QAction* act = _toolBar->addAction(text);
+        connect(act, &QAction::triggered, this, e.slot);
+        // 图标模式下文字不再可见，tooltip 必须同时给出动作名和快捷键。
+        const QString seqText = e.seq.toString();
+        act->setToolTip(seqText.isEmpty() ? text : text + " (" + seqText + ")");
+        _toolActions.append(qMakePair(act, QString::fromLatin1(e.icon)));
+    }
+
+    _toolBar->addSeparator();
+    addToggleTool("wrap-text", QStringLiteral("自动换行"), _actWrap, &MainWindow::onToggleWordWrap);
+    addToggleTool("pilcrow", QStringLiteral("显示所有字符"), _actShowAll, &MainWindow::onToggleShowAllChars);
+    addToggleTool("indent-guide", QStringLiteral("显示缩进参考线"), _actShowGuides, &MainWindow::onToggleShowIndentGuides);
+
+    refreshToolBarIcons();
+}
+
+void MainWindow::refreshToolBarIcons() {
+    bool anyIcon = false;
+    for (const auto& pair : _toolActions) {
+        QIcon ic = toolBarIcon(pair.second, _prefs.darkMode);
+        if (!ic.isNull()) anyIcon = true;
+        pair.first->setIcon(ic);
+    }
+    // 资源缺失（未跑生成脚本的旧构建目录）时退回纯文字，不能让工具栏变成一排空按钮。
+    if (_toolBar) {
+        _toolBar->setToolButtonStyle(anyIcon ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextOnly);
+    }
+}
+
+void MainWindow::setupStatusBar() {
+    auto* bar = statusBar();
+    _statusPosLabel = new QLabel("行: 1  列: 1", this);
+    _statusLengthLabel = new QLabel("长度: 0  行数: 1", this);
+    _statusLineEndingLabel = new ClickableLabel("Unix (LF)", this);
+    _statusEncodingLabel = new ClickableLabel("UTF-8", this);
+    _statusLangLabel = new QLabel("纯文本", this);
+
+    _statusPosLabel->setMinimumWidth(120);
+    _statusLengthLabel->setMinimumWidth(150);
+    _statusLineEndingLabel->setMinimumWidth(110);
+    _statusEncodingLabel->setMinimumWidth(100);
+    _statusLangLabel->setMinimumWidth(110);
+
+    bar->addPermanentWidget(_statusLengthLabel);
+    bar->addPermanentWidget(_statusPosLabel);
+    bar->addPermanentWidget(_statusLineEndingLabel);
+    bar->addPermanentWidget(_statusEncodingLabel);
+    bar->addPermanentWidget(_statusLangLabel);
+
+    connect(_statusLineEndingLabel, &ClickableLabel::doubleClicked, this, &MainWindow::onToggleLineEnding);
+    connect(_statusEncodingLabel, &ClickableLabel::doubleClicked, this, [this]() {
+        onSetEncoding("UTF-8");
+    });
+
+    // 无边框窗口：状态栏最右端放一个拖拽缩放手柄（QSizeGrip 内部会调用 startSystemResize）。
+    bar->addPermanentWidget(new QSizeGrip(bar));
+}
+
+// ---------------- 文件操作 ----------------
+
+void MainWindow::onNewFile() {
+    auto* ed = _tabManager->createNewTab();
+    if (ed) {
+        ed->applyDefaultDocFormat(eolFromPref(_prefs.defaultEOL), _prefs.defaultEncoding.toStdString());
+        updateStatusBar(ed);
+    }
+}
+
+void MainWindow::onOpenFile() {
+    QString path = QFileDialog::getOpenFileName(this, "打开文件", QString(), "所有文件 (*.*)");
+    if (!path.isEmpty()) {
+        openFile(path);
+    }
+}
+
+void MainWindow::openFile(const QString& filePath) {
+    // 已在某标签中打开：直接切换。
+    for (int i = 0; i < _tabManager->count(); ++i) {
+        auto* ed = _tabManager->editorAt(i);
+        if (ed && QString::fromStdString(ed->buffer()->getFilePath()) == filePath) {
+            _tabManager->setCurrentIndex(i);
+            return;
+        }
+    }
+
+    // 优先复用当前“空/未命名/未修改”的标签，否则新建一个。
+    EditorView* ed = nullptr;
+    auto* curEd = _tabManager->currentEditor();
+    if (curEd && curEd->buffer()->getFilePath().empty() && !curEd->buffer()->isModified() && curEd->send(SCI_GETLENGTH) == 0) {
+        ed = curEd;
+    } else {
+        ed = _tabManager->createNewTab();
+    }
+    if (!ed) return;
+
+    if (ed->loadFromFile(filePath)) {
+        _tabManager->updateTabTitle(_tabManager->currentIndex());
+        if (!_fileWatcher->files().contains(filePath)) _fileWatcher->addPath(filePath);
+        addRecentFile(filePath);
+        updateStatusBar(ed);
+        updateLanguageUI(QString::fromStdString(ed->currentLanguage()));
+    }
+}
+
+void MainWindow::onOpenFolderInFileManager() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    QString filePath = QString::fromStdString(ed->buffer()->getFilePath());
+    QString dir = filePath.isEmpty() ? QDir::currentPath() : QFileInfo(filePath).absolutePath();
+    QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+}
+
+void MainWindow::onOpenFolderInTerminal() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    QString filePath = QString::fromStdString(ed->buffer()->getFilePath());
+    QString dir = filePath.isEmpty() ? QDir::currentPath() : QFileInfo(filePath).absolutePath();
+
+    QStringList terminals = {"gnome-terminal", "konsole", "xfce4-terminal", "x-terminal-emulator", "xterm"};
+    for (const auto& term : terminals) {
+        if (QProcess::startDetached(term, QStringList(), dir)) {
+            return;
+        }
+    }
+}
+
+void MainWindow::onReloadFile() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    QString path = QString::fromStdString(ed->buffer()->getFilePath());
+    if (path.isEmpty()) return;
+
+    if (ed->buffer()->isModified()) {
+        auto reply = QMessageBox::question(this, "重新读取文件", "当前文档已被修改，是否放弃未保存的更改并重新载入？", QMessageBox::Yes | QMessageBox::No);
+        if (reply != QMessageBox::Yes) return;
+    }
+    ed->loadFromFile(path);
+    updateStatusBar(ed);
+}
+
+void MainWindow::onSaveFile() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    if (ed->buffer()->getFilePath().empty()) {
+        onSaveAsFile();
+        return;
+    }
+    const QString path = QString::fromStdString(ed->buffer()->getFilePath());
+    _savingPaths.insert(path);
+    bool ok = false;
+    {
+        WatchGuard guard(_fileWatcher, path); // 写盘期间解除监视，避免自保存假警报
+        ok = ed->saveToFile();
+    }
+    _savingPaths.remove(path);
+    if (ok) {
+        _tabManager->updateTabTitle(_tabManager->currentIndex());
+        addRecentFile(path);
+    }
+}
+
+void MainWindow::onSaveAsFile() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    QString path = QFileDialog::getSaveFileName(this, "另存为", QString(), "所有文件 (*.*)");
+    if (!path.isEmpty()) {
+        const QString oldPath = QString::fromStdString(ed->buffer()->getFilePath());
+        _savingPaths.insert(path);
+        if (!oldPath.isEmpty()) _savingPaths.insert(oldPath);
+        bool ok = false;
+        {
+            WatchGuard gNew(_fileWatcher, path);
+            WatchGuard gOld(_fileWatcher, oldPath);
+            ok = ed->saveToFile(path);
+        }
+        _savingPaths.remove(path);
+        if (!oldPath.isEmpty()) _savingPaths.remove(oldPath);
+        if (ok) {
+            _tabManager->updateTabTitle(_tabManager->currentIndex());
+            if (!_fileWatcher->files().contains(path)) _fileWatcher->addPath(path);
+            addRecentFile(path);
+            updateStatusBar(ed);
+        }
+    }
+}
+
+void MainWindow::onSaveCopyAs() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    QString path = QFileDialog::getSaveFileName(this, "拷贝另存为", QString(), "所有文件 (*.*)");
+    if (!path.isEmpty()) {
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly)) {
+            auto len = ed->send(SCI_GETLENGTH);
+            if (len > 0) {
+                QByteArray buf(len + 1, '\0');
+                ed->send(SCI_GETTEXT, len + 1, reinterpret_cast<sptr_t>(buf.data()));
+                file.write(buf.constData(), len);
+            }
+        }
+    }
+}
+
+void MainWindow::onSaveAllFiles() {
+    for (int i = 0; i < _tabManager->count(); ++i) {
+        auto* ed = _tabManager->editorAt(i);
+        if (ed && ed->buffer()->isModified()) {
+            if (ed->buffer()->getFilePath().empty()) {
+                _tabManager->setCurrentIndex(i);
+                onSaveAsFile();
+            } else {
+                const QString path = QString::fromStdString(ed->buffer()->getFilePath());
+                _savingPaths.insert(path);
+                {
+                    WatchGuard guard(_fileWatcher, path);
+                    ed->saveToFile();
+                }
+                _savingPaths.remove(path);
+                _tabManager->updateTabTitle(i);
+            }
+        }
+    }
+}
+
+void MainWindow::onRenameFile() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    QString oldPath = QString::fromStdString(ed->buffer()->getFilePath());
+    if (oldPath.isEmpty()) return;
+
+    QFileInfo fi(oldPath);
+    bool ok = false;
+    QString newName = QInputDialog::getText(this, "重命名文件", "请输入新的文件名:", QLineEdit::Normal, fi.fileName(), &ok);
+    if (ok && !newName.isEmpty() && newName != fi.fileName()) {
+        QString newPath = fi.dir().filePath(newName);
+        if (QFile::rename(oldPath, newPath)) {
+            ed->buffer()->setFilePath(newPath.toStdString());
+            _tabManager->updateTabTitle(_tabManager->currentIndex());
+            _fileWatcher->removePath(oldPath);
+            _fileWatcher->addPath(newPath);
+            addRecentFile(newPath);
+        } else {
+            QMessageBox::warning(this, "错误", "无法重命名该文件。");
+        }
+    }
+}
+
+void MainWindow::onDeleteFileFromDisk() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    QString path = QString::fromStdString(ed->buffer()->getFilePath());
+    if (path.isEmpty()) return;
+
+    auto reply = QMessageBox::warning(this, "从磁盘删除", QString("确定要从磁盘中永久删除文件 %1 吗？").arg(path), QMessageBox::Yes | QMessageBox::No);
+    if (reply == QMessageBox::Yes) {
+        _fileWatcher->removePath(path);
+        QFile::remove(path);
+        _tabManager->closeTab(_tabManager->currentIndex());
+    }
+}
+
+void MainWindow::onCloseFile() {
+    _tabManager->closeTab(_tabManager->currentIndex());
+}
+
+void MainWindow::onCloseAllFiles() {
+    _tabManager->closeAll();
+}
+
+void MainWindow::onCloseAllExceptCurrent() {
+    _tabManager->closeAllExceptCurrent();
+}
+
+void MainWindow::onCloseAllToLeft() {
+    _tabManager->closeAllToLeft();
+}
+
+void MainWindow::onCloseAllToRight() {
+    _tabManager->closeAllToRight();
+}
+
+void MainWindow::onCloseAllUnchanged() {
+    _tabManager->closeAllUnchanged();
+}
+
+void MainWindow::onRestoreClosedFile() {
+    _tabManager->restoreClosedFile();
+}
+
+void MainWindow::onPrint() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+
+    // 直接走 SCI_GETTEXT 取全文：EditorView 里现成的 currentTextUtf8() 是 private，
+    // 而且分页需要按行遍历，拿到整段文本再 split 比逐行取字更省一次接口改动。
+    const sptr_t docLen = ed->send(SCI_GETLENGTH);
+    QByteArray raw(docLen + 1, '\0');
+    if (docLen > 0) ed->send(SCI_GETTEXT, docLen + 1, reinterpret_cast<sptr_t>(raw.data()));
+    raw.chop(1);
+    const QStringList lines = QString::fromUtf8(raw).split(QLatin1Char('\n'));
+
+    QPrinter printer(QPrinter::HighResolution);
+    QPrintDialog dlg(&printer, this);
+    // 本端口还不支持“仅打印选区”，关掉该选项免得给出一个按了没反应的单选钮。
+    dlg.setOption(QAbstractPrintDialog::PrintSelection, false);
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    QPainter p;
+    if (!p.begin(&printer)) {
+        QMessageBox::warning(this, QStringLiteral("打印"), QStringLiteral("无法初始化打印设备。"));
+        return;
+    }
+    // 用编辑器自己的字体打印（等宽提示避免比例字体错位），分页与制表符展开交给 PrintHelper。
+    QFont mono(ed->getEditorFontName(), ed->getEditorFontSize());
+    mono.setStyleHint(QFont::TypeWriter);
+    mono.setFixedPitch(true);
+    p.setFont(mono);
+    PrintHelper::paintTextLines(p, lines, _prefs.tabWidth,
+                                printer.fromPage() > 0 ? printer.fromPage() : 1, printer.toPage());
+    p.end();
+}
+
+void MainWindow::onOpenRecentFile() {
+    auto* act = qobject_cast<QAction*>(sender());
+    if (act) {
+        openFile(act->data().toString());
+    }
+}
+
+void MainWindow::onClearRecentFiles() {
+    _recentFileList.clear();
+    QSettings s;
+    s.setValue("recentFiles", _recentFileList);
+    updateRecentFilesMenu();
+}
+
+void MainWindow::loadRecentFiles() {
+    QSettings s;
+    _recentFileList = s.value("recentFiles").toStringList();
+    updateRecentFilesMenu();
+}
+
+void MainWindow::addRecentFile(const QString& path) {
+    if (path.isEmpty()) return;
+    _recentFileList.removeAll(path);
+    _recentFileList.prepend(path);
+    while (_recentFileList.size() > 15) {
+        _recentFileList.removeLast();
+    }
+    QSettings s;
+    s.setValue("recentFiles", _recentFileList);
+    updateRecentFilesMenu();
+}
+
+void MainWindow::updateRecentFilesMenu() {
+    if (!_recentFilesMenu) return;
+    _recentFilesMenu->clear();
+    for (const auto& path : _recentFileList) {
+        auto* act = _recentFilesMenu->addAction(QFileInfo(path).fileName());
+        act->setData(path);
+        act->setToolTip(path);
+        connect(act, &QAction::triggered, this, &MainWindow::onOpenRecentFile);
+    }
+    if (!_recentFileList.isEmpty()) {
+        _recentFilesMenu->addSeparator();
+        _recentFilesMenu->addAction("清除近期文件列表", this, &MainWindow::onClearRecentFiles);
+    }
+}
+
+// ---------------- 编辑操作 ----------------
+
+void MainWindow::onUndo() { if (auto* ed = _tabManager->currentEditor()) ed->doUndo(); }
+void MainWindow::onRedo() { if (auto* ed = _tabManager->currentEditor()) ed->doRedo(); }
+void MainWindow::onCut() { if (auto* ed = _tabManager->currentEditor()) ed->doCut(); }
+void MainWindow::onCopy() { if (auto* ed = _tabManager->currentEditor()) ed->doCopy(); }
+void MainWindow::onPaste() { if (auto* ed = _tabManager->currentEditor()) ed->doPaste(); }
+void MainWindow::onDelete() { if (auto* ed = _tabManager->currentEditor()) ed->doDelete(); }
+void MainWindow::onSelectAll() { if (auto* ed = _tabManager->currentEditor()) ed->doSelectAll(); }
+
+void MainWindow::onInsertDateTime(bool isLong) {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    QString fmt = isLong ? "yyyy-MM-dd HH:mm:ss dddd" : "yyyy-MM-dd HH:mm";
+    QString text = QDateTime::currentDateTime().toString(fmt);
+    ed->sends(SCI_REPLACESEL, 0, text.toUtf8().constData());
+}
+
+void MainWindow::onCopyFilePath() {
+    if (auto* ed = _tabManager->currentEditor()) {
+        QApplication::clipboard()->setText(QString::fromStdString(ed->buffer()->getFilePath()));
+    }
+}
+
+void MainWindow::onCopyFileName() {
+    if (auto* ed = _tabManager->currentEditor()) {
+        QApplication::clipboard()->setText(QString::fromStdString(ed->buffer()->getFileName()));
+    }
+}
+
+void MainWindow::onCopyDir() {
+    if (auto* ed = _tabManager->currentEditor()) {
+        QString fp = QString::fromStdString(ed->buffer()->getFilePath());
+        if (!fp.isEmpty()) QApplication::clipboard()->setText(QFileInfo(fp).absolutePath());
+    }
+}
+
+void MainWindow::onCopyAllFileNames() {
+    QStringList names;
+    for (int i = 0; i < _tabManager->count(); ++i) {
+        names.append(QString::fromStdString(_tabManager->editorAt(i)->buffer()->getFileName()));
+    }
+    QApplication::clipboard()->setText(names.join("\n"));
+}
+
+void MainWindow::onCopyAllFilePaths() {
+    QStringList paths;
+    for (int i = 0; i < _tabManager->count(); ++i) {
+        QString p = QString::fromStdString(_tabManager->editorAt(i)->buffer()->getFilePath());
+        if (!p.isEmpty()) paths.append(p);
+    }
+    QApplication::clipboard()->setText(paths.join("\n"));
+}
+
+void MainWindow::onIndent() { if (auto* ed = _tabManager->currentEditor()) ed->indent(); }
+void MainWindow::onUnindent() { if (auto* ed = _tabManager->currentEditor()) ed->unindent(); }
+void MainWindow::onToUpperCase() { if (auto* ed = _tabManager->currentEditor()) ed->toUpperCase(); }
+void MainWindow::onToLowerCase() { if (auto* ed = _tabManager->currentEditor()) ed->toLowerCase(); }
+void MainWindow::onToTitleCase() { if (auto* ed = _tabManager->currentEditor()) ed->toTitleCase(); }
+void MainWindow::onInvertCase() { if (auto* ed = _tabManager->currentEditor()) ed->invertCase(); }
+
+void MainWindow::onDuplicateCurrentLine() { if (auto* ed = _tabManager->currentEditor()) ed->duplicateCurrentLine(); }
+void MainWindow::onDeleteCurrentLine() { if (auto* ed = _tabManager->currentEditor()) ed->deleteCurrentLine(); }
+void MainWindow::onMoveLineUp() { if (auto* ed = _tabManager->currentEditor()) ed->moveLineUp(); }
+void MainWindow::onMoveLineDown() { if (auto* ed = _tabManager->currentEditor()) ed->moveLineDown(); }
+void MainWindow::onJoinLines() { if (auto* ed = _tabManager->currentEditor()) ed->joinLines(); }
+void MainWindow::onSplitLines() { if (auto* ed = _tabManager->currentEditor()) ed->splitLines(); }
+void MainWindow::onSortLines(bool asc, bool ic) { if (auto* ed = _tabManager->currentEditor()) ed->sortLines(asc, ic); }
+void MainWindow::onRemoveDuplicateLines() { if (auto* ed = _tabManager->currentEditor()) ed->removeDuplicateLines(); }
+void MainWindow::onReverseLines() { if (auto* ed = _tabManager->currentEditor()) ed->reverseLines(); }
+void MainWindow::onInsertEmptyLine(bool above) { if (auto* ed = _tabManager->currentEditor()) ed->insertEmptyLine(above); }
+
+void MainWindow::onToggleLineComment() { if (auto* ed = _tabManager->currentEditor()) ed->toggleLineComment(); }
+void MainWindow::onBlockComment() { if (auto* ed = _tabManager->currentEditor()) ed->blockComment(); }
+void MainWindow::onUnblockComment() { if (auto* ed = _tabManager->currentEditor()) ed->unblockComment(); }
+
+void MainWindow::onTrimTrailingSpaces() { if (auto* ed = _tabManager->currentEditor()) ed->trimTrailingSpaces(); }
+void MainWindow::onTrimLeadingSpaces() { if (auto* ed = _tabManager->currentEditor()) ed->trimLeadingSpaces(); }
+void MainWindow::onTrimBoth() { if (auto* ed = _tabManager->currentEditor()) ed->trimBoth(); }
+void MainWindow::onTabsToSpaces() { if (auto* ed = _tabManager->currentEditor()) ed->tabsToSpaces(_prefs.tabWidth); }
+void MainWindow::onSpacesToTabs() { if (auto* ed = _tabManager->currentEditor()) ed->spacesToTabs(_prefs.tabWidth); }
+void MainWindow::onRemoveEmptyLines(bool onlyBlank) { if (auto* ed = _tabManager->currentEditor()) ed->removeEmptyLines(onlyBlank); }
+void MainWindow::onToggleReadOnly(bool ro) { if (auto* ed = _tabManager->currentEditor()) ed->setReadOnly(ro); }
+
+void MainWindow::onBeginEndSelect(bool columnMode) {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    ed->beginOrEndSelect(columnMode);
+}
+
+void MainWindow::onColumnModeTip() {
+    // 内容对齐 Notepad++ 的“列选模式提示”，只把第三种方法的菜单名换成本端口的叫法。
+    QMessageBox::information(this, QStringLiteral("列选模式提示"),
+        QStringLiteral(
+            "有 3 种方法可以切换到列选模式：\n\n"
+            "1.（键盘和鼠标）按住 Alt 键，同时用鼠标左键拖动。\n\n"
+            "2.（只需键盘）按住 Alt+Shift 键，再使用方向键。\n\n"
+            "3.（键盘或鼠标）\n"
+            "    把光标放在列块的位置，执行“编辑 > 开始/结束 按列选取”；\n"
+            "    再把光标移动到列块的另一端，再次执行同一命令。\n\n"
+            "进入列选模式后，可用“编辑 > 列编辑器”(Alt+C) 往每一行批量写入文本或递增数字。"));
+}
+
+void MainWindow::onColumnEditor() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+
+    // 参数在 MainWindow 里留存，下次打开还能看到上次的输入；
+    // 是否已有列选区传给对话框，用于把“没有列选区”时的退化行为先告知用户。
+    ColumnEditorDialog dlg(_colEditParams, ed->hasColumnSelection(), this);
+    if (dlg.exec() != QDialog::Accepted) return;
+    _colEditParams = dlg.params();
+
+    if (_colEditParams.textMode) {
+        ed->columnInsertText(_colEditParams.text);
+    } else {
+        ed->columnInsertNumber(_colEditParams.initialValue, _colEditParams.incrementValue,
+                               _colEditParams.repeatValue, _colEditParams.base,
+                               _colEditParams.hexUpper, _colEditParams.pad);
+    }
+}
+
+// ---------------- 搜索操作 ----------------
+
+void MainWindow::onFind() {
+    auto* ed = _tabManager->currentEditor();
+    if (ed) {
+        _findDialog->setTargetEditor(ed);
+        auto selLen = ed->send(SCI_GETSELECTIONEND) - ed->send(SCI_GETSELECTIONSTART);
+        if (selLen > 0 && selLen < 120) {
+            QByteArray buf(selLen + 1, '\0');
+            ed->send(SCI_GETSELTEXT, 0, reinterpret_cast<sptr_t>(buf.data()));
+            _findDialog->setFindText(QString::fromUtf8(buf.constData()));
+        }
+    }
+    _findDialog->switchToReplaceMode(false);
+    _findDialog->show();
+    _findDialog->activateWindow();
+}
+
+void MainWindow::onReplace() {
+    auto* ed = _tabManager->currentEditor();
+    if (ed) {
+        _findDialog->setTargetEditor(ed);
+        auto selLen = ed->send(SCI_GETSELECTIONEND) - ed->send(SCI_GETSELECTIONSTART);
+        if (selLen > 0 && selLen < 120) {
+            QByteArray buf(selLen + 1, '\0');
+            ed->send(SCI_GETSELTEXT, 0, reinterpret_cast<sptr_t>(buf.data()));
+            _findDialog->setFindText(QString::fromUtf8(buf.constData()));
+        }
+    }
+    _findDialog->switchToReplaceMode(true);
+    _findDialog->show();
+    _findDialog->activateWindow();
+}
+
+void MainWindow::onFindNext() {
+    if (auto* ed = _tabManager->currentEditor()) {
+        _findDialog->setTargetEditor(ed);
+        _findDialog->onFindNext();
+    }
+}
+
+void MainWindow::onFindPrev() {
+    if (auto* ed = _tabManager->currentEditor()) {
+        _findDialog->setTargetEditor(ed);
+        _findDialog->onFindPrev();
+    }
+}
+
+void MainWindow::onQuickFindNext() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    auto len = ed->send(SCI_GETSELECTIONEND) - ed->send(SCI_GETSELECTIONSTART);
+    if (len > 0) {
+        QByteArray buf(len + 1, '\0');
+        ed->send(SCI_GETSELTEXT, 0, reinterpret_cast<sptr_t>(buf.data()));
+        ed->findNext(QString::fromUtf8(buf.constData()), true, false, false);
+    }
+}
+
+void MainWindow::onQuickFindPrev() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    auto len = ed->send(SCI_GETSELECTIONEND) - ed->send(SCI_GETSELECTIONSTART);
+    if (len > 0) {
+        QByteArray buf(len + 1, '\0');
+        ed->send(SCI_GETSELTEXT, 0, reinterpret_cast<sptr_t>(buf.data()));
+        ed->findPrev(QString::fromUtf8(buf.constData()), true, false, false);
+    }
+}
+
+void MainWindow::onGoToLine() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    auto curLine = ed->send(SCI_LINEFROMPOSITION, ed->send(SCI_GETCURRENTPOS)) + 1;
+    auto maxLine = ed->send(SCI_GETLINECOUNT);
+    GoToLineDialog dlg(static_cast<int>(curLine), static_cast<int>(maxLine), this);
+    if (dlg.exec() == QDialog::Accepted) {
+        ed->goToLine(dlg.getTargetLine());
+    }
+}
+
+void MainWindow::onGoToMatchingBrace() { if (auto* ed = _tabManager->currentEditor()) ed->goToMatchingBrace(); }
+void MainWindow::onSelectToMatchingBrace() { if (auto* ed = _tabManager->currentEditor()) ed->selectToMatchingBrace(); }
+
+void MainWindow::onToggleBookmark() { if (auto* ed = _tabManager->currentEditor()) ed->toggleBookmark(); }
+void MainWindow::onNextBookmark() { if (auto* ed = _tabManager->currentEditor()) ed->nextBookmark(); }
+void MainWindow::onPrevBookmark() { if (auto* ed = _tabManager->currentEditor()) ed->prevBookmark(); }
+void MainWindow::onClearAllBookmarks() { if (auto* ed = _tabManager->currentEditor()) ed->clearAllBookmarks(); }
+void MainWindow::onCopyBookmarkedLines() { if (auto* ed = _tabManager->currentEditor()) ed->copyBookmarkedLines(); }
+void MainWindow::onCutBookmarkedLines() { if (auto* ed = _tabManager->currentEditor()) ed->cutBookmarkedLines(); }
+void MainWindow::onDeleteBookmarkedLines() { if (auto* ed = _tabManager->currentEditor()) ed->deleteBookmarkedLines(); }
+void MainWindow::onDeleteNonBookmarkedLines() { if (auto* ed = _tabManager->currentEditor()) ed->deleteNonBookmarkedLines(); }
+void MainWindow::onInverseBookmarks() { if (auto* ed = _tabManager->currentEditor()) ed->inverseBookmarks(); }
+void MainWindow::onMarkText(int styleIdx) { if (auto* ed = _tabManager->currentEditor()) ed->markSelectedText(styleIdx); }
+void MainWindow::onClearMarks() { if (auto* ed = _tabManager->currentEditor()) ed->clearMarks(); }
+
+// ---------------- 视图操作 ----------------
+
+void MainWindow::onToggleFullScreen(bool fs) {
+    if (fs) showFullScreen();
+    else showNormal();
+}
+
+void MainWindow::onToggleAlwaysOnTop(bool top) {
+    setWindowFlag(Qt::WindowStaysOnTopHint, top);
+    show();
+}
+
+void MainWindow::forEachEditor(const std::function<void(EditorView*)>& fn) {
+    for (int i = 0; i < _tabManager->count(); ++i) {
+        if (auto* ed = _tabManager->editorAt(i)) fn(ed);
+    }
+}
+
+// 下面几个视图开关都是“持续状态”：既要写回 _prefs（新标签页靠 editorCreated 从偏好继承），
+// 又要当场作用到每一个已打开的标签页，最后落盘，重启后保持不变。
+void MainWindow::onToggleWordWrap(bool wrap) {
+    _prefs.wordWrap = wrap;
+    forEachEditor([wrap](EditorView* ed) { ed->setWrapMode(wrap); });
+    savePreferences();
+}
+
+void MainWindow::onToggleShowWhitespace(bool show) {
+    _prefs.showWhitespace = show;
+    forEachEditor([show](EditorView* ed) { ed->setShowWhitespace(show); });
+    savePreferences();
+}
+
+void MainWindow::onToggleShowEOL(bool show) {
+    _prefs.showEOL = show;
+    forEachEditor([show](EditorView* ed) { ed->setShowEOL(show); });
+    savePreferences();
+}
+
+void MainWindow::onToggleShowAllChars(bool show) {
+    // “显示所有字符”是前两个开关的合体（与 Notepad++ 一致）。
+    // 注意 setChecked() 只发射 toggled、不发射 triggered，而渲染逻辑是挂在 triggered 上的，
+    // 所以不能指望两个分量开关替我们把命令发出去，必须在这里自己应用一遍。
+    if (_actShowWs) _actShowWs->setChecked(show);
+    if (_actShowEol) _actShowEol->setChecked(show);
+    _prefs.showWhitespace = show;
+    _prefs.showEOL = show;
+    forEachEditor([show](EditorView* ed) {
+        ed->setShowWhitespace(show);
+        ed->setShowEOL(show);
+    });
+    savePreferences();
+}
+
+void MainWindow::onToggleShowIndentGuides(bool show) {
+    _prefs.showIndentGuides = show;
+    forEachEditor([show](EditorView* ed) { ed->setShowIndentGuides(show); });
+    savePreferences();
+}
+
+void MainWindow::onZoomIn() { if (auto* ed = _tabManager->currentEditor()) ed->zoomIn(); }
+void MainWindow::onZoomOut() { if (auto* ed = _tabManager->currentEditor()) ed->zoomOut(); }
+void MainWindow::onZoomReset() { if (auto* ed = _tabManager->currentEditor()) ed->zoomReset(); }
+
+void MainWindow::onFoldCurrent() { if (auto* ed = _tabManager->currentEditor()) ed->toggleCurrentFold(); }
+void MainWindow::onUnfoldCurrent() { if (auto* ed = _tabManager->currentEditor()) ed->toggleCurrentFold(); }
+void MainWindow::onFoldAll() { if (auto* ed = _tabManager->currentEditor()) ed->foldAll(); }
+void MainWindow::onUnfoldAll() { if (auto* ed = _tabManager->currentEditor()) ed->unfoldAll(); }
+void MainWindow::onFoldLevel(int lvl) { if (auto* ed = _tabManager->currentEditor()) ed->foldLevel(lvl); }
+void MainWindow::onUnfoldLevel(int lvl) { if (auto* ed = _tabManager->currentEditor()) ed->unfoldLevel(lvl); }
+
+void MainWindow::onNextTab() {
+    int idx = (_tabManager->currentIndex() + 1) % _tabManager->count();
+    _tabManager->setCurrentIndex(idx);
+}
+
+void MainWindow::onPrevTab() {
+    int idx = (_tabManager->currentIndex() - 1 + _tabManager->count()) % _tabManager->count();
+    _tabManager->setCurrentIndex(idx);
+}
+
+void MainWindow::onFirstTab() { _tabManager->setCurrentIndex(0); }
+void MainWindow::onLastTab() { _tabManager->setCurrentIndex(_tabManager->count() - 1); }
+void MainWindow::onMoveTabLeft() { _tabManager->moveTabLeft(); }
+void MainWindow::onMoveTabRight() { _tabManager->moveTabRight(); }
+
+void MainWindow::onShowDocSummary() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    DocSummary s = ed->getSummary();
+    DocSummaryDialog dlg(QString::fromStdString(ed->buffer()->getFilePath()), s, this);
+    dlg.exec();
+}
+
+void MainWindow::onToggleDarkMode(bool enabled) {
+    _isDarkMode = enabled;
+    _prefs.darkMode = enabled;
+    applyDarkModePalette(enabled);
+    refreshToolBarIcons(); // 图标前景色分深/浅两套，必须随主题重建
+    for (int i = 0; i < _tabManager->count(); ++i) {
+        if (auto* ed = _tabManager->editorAt(i)) {
+            ed->setDarkMode(enabled);
+            ed->applyLanguage(ed->currentLanguage());
+        }
+    }
+    savePreferences(); // 直接通过菜单切换时也持久化，避免下次启动丢失
+}
+
+void MainWindow::applyDarkModePalette(bool dark) {
+    ThemeManager::applyTheme(dark);
+}
+
+// ---------------- 编码操作 ----------------
+
+void MainWindow::onSetEncoding(const QString& enc) {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    const QString path = QString::fromStdString(ed->buffer()->getFilePath());
+    if (!path.isEmpty()) {
+        // “设定编码”= 用新编码重新解释磁盘字节（等同 N++ 在指定编码下载入/重载）。
+        if (ed->buffer()->isModified()) {
+            auto reply = QMessageBox::question(this, "以指定编码重新载入",
+                QString("当前文档已修改，以 %1 重新载入将丢弃未保存的更改。是否继续？").arg(enc),
+                QMessageBox::Yes | QMessageBox::No);
+            if (reply != QMessageBox::Yes) {
+                // 撤销菜单勾选态：回到缓冲区当前编码
+                updateEncodingUI(QString::fromStdString(ed->buffer()->getEncoding()));
+                return;
+            }
+        }
+        ed->reloadWithEncoding(enc.toStdString());
+    } else {
+        // 新建空文档：仅设定后续保存使用的目标编码。
+        ed->buffer()->setEncoding(enc.toStdString());
+    }
+    updateEncodingUI(enc);
+}
+
+void MainWindow::onConvertToEncoding(const QString& enc) {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    ed->buffer()->setEncoding(enc.toStdString());
+    ed->buffer()->setModified(true);
+    _tabManager->updateTabTitle(_tabManager->currentIndex());
+    updateEncodingUI(enc);
+}
+
+void MainWindow::onConvertLineEnding(LineEnding le) {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    ed->convertLineEndings(le);
+    if (_statusLineEndingLabel) _statusLineEndingLabel->setText(QString::fromStdString(ed->buffer()->getLineEndingString()));
+}
+
+void MainWindow::onToggleLineEnding() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    LineEnding cur = ed->buffer()->getLineEnding();
+    LineEnding next = (cur == LineEnding::CRLF) ? LineEnding::LF : LineEnding::CRLF;
+    onConvertLineEnding(next);
+}
+
+void MainWindow::updateEncodingUI(const QString& enc) {
+    auto it = _encodingActionMap.find(enc);
+    if (it != _encodingActionMap.end()) {
+        it->second->setChecked(true);
+    }
+    _statusEncodingLabel->setText(enc);
+}
+
+// ---------------- 语言操作 ----------------
+
+void MainWindow::onLanguageActionTriggered(QAction* action) {
+    if (!action) return;
+    setLanguage(action->data().toString());
+}
+
+void MainWindow::setLanguage(const QString& langId) {
+    if (auto* ed = _tabManager->currentEditor()) {
+        ed->applyLanguage(langId.toStdString());
+        updateLanguageUI(langId);
+    }
+}
+
+void MainWindow::updateLanguageUI(const QString& langId) {
+    auto it = _langActionMap.find(langId);
+    if (it != _langActionMap.end()) {
+        it->second->setChecked(true);
+        _statusLangLabel->setText(it->second->text());
+    } else {
+        auto defaultIt = _langActionMap.find("normal");
+        if (defaultIt != _langActionMap.end()) {
+            defaultIt->second->setChecked(true);
+        }
+        _statusLangLabel->setText(langId);
+    }
+}
+
+// ---------------- 设置操作 ----------------
+
+void MainWindow::onPreferences() {
+    PreferencesDialog dlg(_prefs, this);
+    if (dlg.exec() == QDialog::Accepted) {
+        applyPreferences(dlg.getPreferences());
+    }
+}
+
+void MainWindow::onStyleConfigurator() {
+    StyleConfigDialog dlg(this);
+    // 对话框内部写入 QSettings 并 emit styleUpdated；这里回灌覆盖并重绘所有编辑器。
+    connect(&dlg, &StyleConfigDialog::styleUpdated, this, &MainWindow::reloadStyleOverrides);
+    dlg.exec();
+    reloadStyleOverrides(); // 关闭时确保最新覆盖已生效
+}
+
+void MainWindow::reloadStyleOverrides() {
+    struct Override { QString id; int fg; int bg; bool bold; bool italic; };
+    QList<Override> overrides;
+    QSettings s;
+    s.beginGroup("styleOverride");
+    for (const QString& id : s.childKeys()) {
+        const QStringList parts = s.value(id).toString().split(';');
+        if (parts.size() < 2) continue;
+        Override o;
+        o.id = id;
+        o.fg = parts[0].toInt();
+        o.bg = parts[1].toInt();
+        o.bold = parts.size() >= 3 && parts[2].toInt() != 0;
+        o.italic = parts.size() >= 4 && parts[3].toInt() != 0;
+        overrides.append(o);
+    }
+    s.endGroup();
+
+    // 语言级覆盖写入 StyleManager（槽位 0 = 该语言的默认文本样式）。
+    for (const auto& o : overrides) {
+        if (o.id == "global") continue;
+        StyleManager::instance().overrideStyle(o.id.toStdString(), 0, o.fg, o.bg, o.bold, o.italic);
+    }
+
+    int globalFg = -1, globalBg = -1;
+    for (const auto& o : overrides) {
+        if (o.id == "global") { globalFg = o.fg; globalBg = o.bg; }
+    }
+
+    // 重新应用高亮（会重置样式），随后叠加全局默认前景/背景覆盖。
+    for (int i = 0; i < _tabManager->count(); ++i) {
+        auto* ed = _tabManager->editorAt(i);
+        if (!ed) continue;
+        ed->applyThemeStyles(ed->currentLanguage());
+        if (globalFg != -1 || globalBg != -1) {
+            ed->applyGlobalStyleOverride(globalFg, globalBg);
+        }
+    }
+}
+
+void MainWindow::onShortcutsMapper() {
+    ShortcutsDialog dlg(this);
+    dlg.exec();
+}
+
+void MainWindow::applyPreferences(const AppPreferences& prefs) {
+    _prefs = prefs;
+    savePreferences();
+
+    if (_prefs.darkMode != _isDarkMode) {
+        onToggleDarkMode(_prefs.darkMode);
+        if (_actDarkMode) _actDarkMode->setChecked(_prefs.darkMode);
+    }
+
+    if (_actWrap) _actWrap->setChecked(_prefs.wordWrap);
+    if (_actShowWs) _actShowWs->setChecked(_prefs.showWhitespace);
+    if (_actShowEol) _actShowEol->setChecked(_prefs.showEOL);
+    if (_actShowGuides) _actShowGuides->setChecked(_prefs.showIndentGuides);
+    // 合体项的勾选由 syncShowAll 在分量开关的 toggled 里推导，但两个分量都没变化时
+    // toggled 不会发射，所以这里显式算一次，避免从配置文件恢复时漏掉。
+    if (_actShowAll) _actShowAll->setChecked(_prefs.showWhitespace && _prefs.showEOL);
+
+    for (int i = 0; i < _tabManager->count(); ++i) {
+        auto* ed = _tabManager->editorAt(i);
+        if (!ed) continue;
+        applyPreferencesToEditor(ed);
+    }
+}
+
+void MainWindow::applyPreferencesToEditor(EditorView* ed) {
+    if (!ed) return;
+    ed->setEditorFont(_prefs.fontName, _prefs.fontSize);
+    ed->send(SCI_SETTABWIDTH, _prefs.tabWidth);
+    ed->send(SCI_SETUSETABS, _prefs.tabToSpaces ? 0 : 1);
+    ed->setWrapMode(_prefs.wordWrap);
+    ed->setShowLineNumbers(_prefs.showLineNumbers);
+    ed->send(SCI_SETMARGINWIDTHN, 1, 14);
+    ed->send(SCI_SETMARGINWIDTHN, 2, _prefs.showFoldMargin ? 14 : 0);
+    ed->setShowIndentGuides(_prefs.showIndentGuides);
+    ed->setShowWhitespace(_prefs.showWhitespace);
+    ed->setShowEOL(_prefs.showEOL);
+    ed->setDarkMode(_prefs.darkMode);
+}
+
+void MainWindow::loadPreferences() {
+    QSettings s;
+    _prefs.fontName = s.value("prefs/fontName", "Monospace").toString();
+    _prefs.fontSize = s.value("prefs/fontSize", 10).toInt();
+    _prefs.tabWidth = s.value("prefs/tabWidth", 4).toInt();
+    _prefs.tabToSpaces = s.value("prefs/tabToSpaces", false).toBool();
+    _prefs.wordWrap = s.value("prefs/wordWrap", false).toBool();
+    _prefs.darkMode = s.value("prefs/darkMode", false).toBool();
+    _prefs.showLineNumbers = s.value("prefs/showLineNumbers", true).toBool();
+    _prefs.showFoldMargin = s.value("prefs/showFoldMargin", true).toBool();
+    _prefs.showIndentGuides = s.value("prefs/showIndentGuides", false).toBool();
+    _prefs.showWhitespace = s.value("prefs/showWhitespace", false).toBool();
+    _prefs.showEOL = s.value("prefs/showEOL", false).toBool();
+    _prefs.defaultEOL = s.value("prefs/defaultEOL", "Unix (LF)").toString();
+    _prefs.defaultEncoding = s.value("prefs/defaultEncoding", "UTF-8").toString();
+}
+
+void MainWindow::savePreferences() {
+    QSettings s;
+    s.setValue("prefs/fontName", _prefs.fontName);
+    s.setValue("prefs/fontSize", _prefs.fontSize);
+    s.setValue("prefs/tabWidth", _prefs.tabWidth);
+    s.setValue("prefs/tabToSpaces", _prefs.tabToSpaces);
+    s.setValue("prefs/wordWrap", _prefs.wordWrap);
+    s.setValue("prefs/darkMode", _prefs.darkMode);
+    s.setValue("prefs/showLineNumbers", _prefs.showLineNumbers);
+    s.setValue("prefs/showFoldMargin", _prefs.showFoldMargin);
+    s.setValue("prefs/showIndentGuides", _prefs.showIndentGuides);
+    s.setValue("prefs/showWhitespace", _prefs.showWhitespace);
+    s.setValue("prefs/showEOL", _prefs.showEOL);
+    s.setValue("prefs/defaultEOL", _prefs.defaultEOL);
+    s.setValue("prefs/defaultEncoding", _prefs.defaultEncoding);
+}
+
+// ---------------- 内部更新 ----------------
+
+void MainWindow::onActiveEditorChanged(EditorView* editor) {
+    if (editor) {
+        connect(editor, &EditorView::cursorPositionChanged, this, &MainWindow::onCursorChanged, Qt::UniqueConnection);
+        connect(editor, &EditorView::lineEndingChanged, this, [this](LineEnding) {
+            if (auto* cur = _tabManager->currentEditor()) {
+                _statusLineEndingLabel->setText(QString::fromStdString(cur->buffer()->getLineEndingString()));
+            }
+        });
+        connect(editor, &EditorView::languageChanged, this, [this](const QString& langId) {
+            updateLanguageUI(langId);
+        });
+
+        if (_actReadOnly) _actReadOnly->setChecked(editor->isReadOnly());
+        updateStatusBar(editor);
+        updateLanguageUI(QString::fromStdString(editor->currentLanguage()));
+        updateEncodingUI(QString::fromStdString(editor->buffer()->getEncoding()));
+        syncWindowTitle();
+    }
+}
+
+void MainWindow::syncWindowTitle() {
+    // 直接取当前标签页的文本（去掉修改标记 *）。
+    // 标题栏已不再绘制这个文本，但 GNOME/KDE 任务栏悬停提示读的就是窗口标题，
+    // 所以仍要保持它与当前标签一致，才能“鼠标移到任务栏上就知道正在编辑哪个文件”。
+    const int idx = _tabManager->currentIndex();
+    QString name = idx >= 0 ? _tabManager->tabText(idx) : QString();
+    if (name.endsWith('*')) name.chop(1); // 去掉 TabManager 追加的修改标记 '*'
+    setWindowTitle(name.isEmpty() ? QStringLiteral("Notepad++ (Linux)")
+                                  : name + " - Notepad++ (Linux)");
+}
+
+void MainWindow::onCursorChanged(int line, int col) {
+    _statusPosLabel->setText(QString("行: %1  列: %2").arg(line).arg(col));
+    if (auto* ed = _tabManager->currentEditor()) {
+        auto len = ed->send(SCI_GETLENGTH);
+        auto lineCount = ed->send(SCI_GETLINECOUNT);
+        _statusLengthLabel->setText(QString("长度: %1  行数: %2").arg(len).arg(lineCount));
+    }
+}
+
+void MainWindow::updateStatusBar(EditorView* editor) {
+    if (!editor) return;
+    auto buf = editor->buffer();
+    if (_statusEncodingLabel) _statusEncodingLabel->setText(QString::fromStdString(buf->getEncoding()));
+    if (_statusLineEndingLabel) _statusLineEndingLabel->setText(QString::fromStdString(buf->getLineEndingString()));
+    auto len = editor->send(SCI_GETLENGTH);
+    auto lineCount = editor->send(SCI_GETLINECOUNT);
+    if (_statusLengthLabel) _statusLengthLabel->setText(QString("长度: %1  行数: %2").arg(len).arg(lineCount));
+}
+
+void MainWindow::onFileChangedOnDisk(const QString& path) {
+    // 自身写盘触发的变更：忽略（双保险，WatchGuard 已在此期间解除监视）。
+    if (_savingPaths.contains(path)) return;
+
+    for (int i = 0; i < _tabManager->count(); ++i) {
+        auto* ed = _tabManager->editorAt(i);
+        if (ed && QString::fromStdString(ed->buffer()->getFilePath()) == path) {
+            if (!ed->buffer()->isModified()) {
+                // 未修改：静默自动重载（与 N++ 默认行为一致），不打断用户。
+                ed->loadFromFile(path);
+                if (ed == _tabManager->currentEditor()) updateStatusBar(ed);
+            } else {
+                auto reply = QMessageBox::question(this, "文件已被外部修改",
+                    QString("文件 %1 已被外部程序修改。\n是否放弃本地未保存更改并重新载入？").arg(path),
+                    QMessageBox::Yes | QMessageBox::No);
+                if (reply == QMessageBox::Yes) {
+                    ed->loadFromFile(path);
+                }
+            }
+            // 外部工具以“删除重建/重命名”方式改文件会使 inotify watch 失效，此处重新挂上。
+            if (QFile::exists(path) && !_fileWatcher->files().contains(path)) {
+                _fileWatcher->addPath(path);
+            }
+            break;
+        }
+    }
+}
+
+void MainWindow::paintEvent(QPaintEvent* event) {
+    QStyleOption opt;
+    opt.initFrom(this);
+    QPainter p(this);
+    style()->drawPrimitive(QStyle::PE_Widget, &opt, &p, this);
+    QMainWindow::paintEvent(event);
+}
+
+void MainWindow::closeEvent(QCloseEvent* event) {
+    if (!_tabManager->closeAll()) {
+        event->ignore();
+        return;
+    }
+    event->accept();
+}

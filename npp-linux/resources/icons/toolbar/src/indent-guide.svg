@@ -1,0 +1,11 @@
+<!-- 自制图标：Lucide 中没有能准确表达"缩进参考线"的现成图形（indent 是"增加缩进"动作，
+     columns/gantt 表达的是分栏/排期）。这里沿用 Lucide 的笔触规范（stroke-width=2、圆头端点、
+     24x24 网格），画两条不同层级的竖向参考线 + 三行缩进后的文本。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M4 5v14"/>
+  <path d="M8 9v6"/>
+  <path d="M13 5h7"/>
+  <path d="M13 12h7"/>
+  <path d="M13 19h7"/>
+</svg>

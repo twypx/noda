@@ -1,0 +1,24 @@
+# 构建产物
+build/
+npp-linux/build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.o
+*.a
+*.so
+*.obj
+
+# 图标生成脚本的缓存
+__pycache__/
+*.pyc
+
+# 临时验证程序（一次性探针，不应入库）
+*_probe
+*_probe.cpp
+
+# 编辑器/系统
+*.swp
+*~
+.DS_Store

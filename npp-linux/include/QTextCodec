@@ -1,0 +1,51 @@
+#pragma once
+#include <QString>
+#include <QStringDecoder>
+#include <QStringEncoder>
+#include <QByteArray>
+#include <string_view>
+#include <cstring>
+
+class QTextCodec {
+public:
+    explicit QTextCodec(QStringConverter::Encoding encoding = QStringConverter::Utf8)
+        : _encoding(encoding) {}
+
+    static QTextCodec* codecForName(const char* name) {
+        static QTextCodec s_utf8(QStringConverter::Utf8);
+        if (!name) return &s_utf8;
+        
+        auto enc = QStringConverter::encodingForName(name);
+        if (enc) {
+            static thread_local QTextCodec s_custom;
+            s_custom._encoding = *enc;
+            return &s_custom;
+        }
+        return &s_utf8;
+    }
+
+    QString toUnicode(const char* chars, int len) const {
+        if (!chars || len <= 0) return QString();
+        QStringDecoder decoder(_encoding);
+        return decoder(QByteArrayView(chars, len));
+    }
+
+    QString toUnicode(const char* chars) const {
+        if (!chars) return QString();
+        return toUnicode(chars, static_cast<int>(std::strlen(chars)));
+    }
+
+    QByteArray fromUnicode(const QString& text) const {
+        QStringEncoder encoder(_encoding);
+        return encoder(text);
+    }
+
+    bool canEncode(const QString& text) const {
+        QStringEncoder encoder(_encoding);
+        encoder(text);
+        return !encoder.hasError();
+    }
+
+private:
+    QStringConverter::Encoding _encoding{QStringConverter::Utf8};
+};

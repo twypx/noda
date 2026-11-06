@@ -1,0 +1,175 @@
+# Notepad++ Linux Port (Qt6 / Widgets Native)
+
+基于 Notepad++ 核心资产与逻辑改造的 Linux 原生高性能实现。
+
+## 架构特点与性能保证
+
+1. **零性能损失**：
+   - 彻底剔除 Windows Win32 API 与 GDI 历史依赖。
+   - 采用纯 C++20 + **Qt Widgets** 原生架构（非 QML/Webview），启动耗时约 80-120ms，内存占用约 35-45MB。
+   - 编辑核心采用 Scintilla 原生 Qt 接口（`ScintillaEditBase`），保持超大文件极端流畅的文本吞吐能力。
+2. **核心资产完全复用**：
+   - 语法高亮与主题：通过 `pugixml` 原生解析原版的 `langs.model.xml` 与 `stylers.model.xml`。
+   - 智能字符集编码识别：直接复用 `PowerEditor/src/uchardet/`（Mozilla 算法），自动识别 UTF-8 / GBK / Big5 等。
+   - 全链路统一采用 UTF-8 内存流，彻底消除了 Windows 版在 UTF-16 (`wchar_t`) 与 UTF-8 之间的频繁拷贝开销。
+3. **已实现基础功能**：
+   - [x] 多标签页管理（新建、打开、保存、另存为、未保存修改提示）
+   - [x] Scintilla 纯原生文本编辑、撤销/重做、剪切/复制/粘贴、全选
+   - [x] 行号与折叠列、当前行高亮
+   - [x] 自动换行切换
+   - [x] 智能文件编码检测与显示（UTF-8, GBK 等）
+   - [x] 跨平台换行符自动识别与状态栏显示（Unix LF / Windows CRLF / Mac CR）
+   - [x] 毫秒级查找与替换（区分大小写、全字匹配、正则支持、全部替换）
+   - [x] 磁盘文件外部修改实时监控与重载提醒（Linux `inotify` 驱动）
+
+## 编译环境依赖
+
+在 Ubuntu / Debian 系统上安装必要依赖：
+
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake qt6-base-dev qt6-base-dev-tools
+```
+
+*(如果使用 Qt5 环境，可安装：`sudo apt install -y build-essential cmake qtbase5-dev qtbase5-dev-tools`)*
+
+## 一键编译与运行
+
+```bash
+cd npp-linux
+./build.sh
+
+# 运行
+./build/notepad-plus-plus-linux
+```
+
+## 应用图标
+
+图标源文件为 `notepad++.png`（1024x1024 官方 logo），由 `tools/gen_icons.py`（Pillow）
+离线加工成 **iOS 风格** 图标：超椭圆（squircle，Lamé 曲线 n=5）切角、把原图近黑底色软色键
+替换为绿色渐变、给纸面加悬浮投影、叠加顶部高光与内侧亮边。
+
+- `resources/icons/app_master_1024.png` —— 加工后的母图，所有小尺寸由它缩放而来。
+- `resources/icons/app_{16,24,32,48,64,128,256}.png` —— 经 `resources/app.qrc` 内嵌进可执行文件，
+  运行时由 `main.cpp` 设为窗口图标，并由 `TitleBar` 以 20px 显示在标题栏最左侧（菜单栏“文件”的左边），
+  不依赖系统 QtSvg 开发包。
+- `resources/icons/hicolor/{16x16 … 512x512,scalable}/apps/notepad-plus-plus-linux.png` —— 系统图标主题用。
+
+重新生成（修改了源图或想调风格时）：
+
+```bash
+sudo apt install -y python3-pil
+python3 tools/gen_icons.py
+```
+
+色调、切角、投影、高光等参数集中在 `tools/gen_icons.py` 顶部的常量区。
+
+让 GNOME/KDE 任务栏与应用列表识别图标（写入 `~/.local`，无需 root）：
+
+```bash
+./install_desktop.sh                       # 默认使用 build/ 或 /usr/local/bin 下的可执行文件
+./install_desktop.sh /opt/npp/notepad-plus-plus-linux   # 也可显式指定路径
+```
+
+`sudo make install` 时会一并安装 hicolor 图标与 `notepad-plus-plus-linux.desktop`。
+
+> 标题栏中间不再绘制文件名。当前打开的文件依靠 `MainWindow::syncWindowTitle()` 写入窗口标题，
+> GNOME/KDE 任务栏悬停时读的就是这个标题，因此鼠标移到任务栏上仍能看到完整文件名。
+
+## 工具栏
+
+工具栏为纯图标模式，19 个动作分 6 组（组间用分隔符）：
+
+| 分组 | 动作 |
+|---|---|
+| 文件 | 新建 · 打开 · 保存 · 全部保存 · 关闭 · 全部关闭 · 打印 |
+| 剪贴板 | 剪切 · 复制 · 粘贴 |
+| 撤销 | 撤销 · 恢复 |
+| 搜索 | 查找 · 替换 |
+| 缩放 | 放大 · 缩小 |
+| 显示开关 | 自动换行 · 显示所有字符 · 显示缩进参考线 |
+
+最后三个是开关型按钮：它们与“视图”菜单里同名的 checkable 项各自持有 QAction（共用一个
+action 会把图标一并带进菜单），靠一对 `toggled` 连接双向同步勾选状态。“显示所有字符”与
+Notepad++ 一致，是“空格与制表符”+“换行符”两个开关的合体，后两者任一关掉时它会自动取消勾选。
+
+这三个开关是**全局持续状态**，不是“点一下就结束”的一次性动作：切换时写回 `_prefs`、
+当场作用到**每一个**已打开的标签页（而不只是当前那个）、并落盘，因此新开标签页会从偏好继承，
+重启后保持不变。两个容易踩的点：
+
+- 选中态必须靠 QSS 里的 `QToolButton:checked` 规则显式画出来。样式表一旦接管了 QToolButton
+  就不再回退原生外观，缺了 `:checked` 时按钮开着和关着看起来一模一样。
+- “显示所有字符”除了同步两个分量开关的勾选，还必须自己把渲染做一遍：`setChecked()` 只发射
+  `toggled`、不发射 `triggered`，而渲染逻辑挂在 `triggered` 上，指望分量开关替自己发命令会一个字节都不变。
+
+## 列选模式与列编辑器
+
+对应 Notepad++ “编辑”菜单里的四个条目，本端全部对齐（菜单文案与官方简体中文一致）：
+
+| 菜单项 | 快捷键 | 作用 |
+| --- | --- | --- |
+| 开始/结束 选取 | Ctrl+Shift+B | 第一次按下记住起点，第二次选中两点之间的普通选区 |
+| 开始/结束 按列选取 | Alt+Shift+B | 同上，但第二次按下得到矩形列块（键盘两点定块） |
+| 列选模式... | （无） | 弹出说明，列出进入列选的三种方式 |
+| 列编辑器... | Alt+C | 在列块每一行插入相同文本，或插入按增量递增的数字 |
+
+进入列选有三条路：按住 Alt 拖动鼠标、Alt+Shift+方向键扩展、以及上面的两点定块。
+前两条是 Scintilla 的原生能力（`rectangularSelectionModifier` 默认就是 Alt，
+`SCI_*RECTEXTEND` 也在默认键表里），端口只开了 `SCVS_RECTANGULARSELECTION` 让选区可以越过行尾，
+没有重复实现；只有第三条需要自己写（`EditorView::beginOrEndSelect`）。
+
+列选相关代码集中在 `EditorView.cpp` 的“列选模式”一节（以及 `EditorView.h` 里同名的公共接口），
+算法照搬 Notepad++ `columnReplace`：
+一个矩形列块在 Scintilla 内部是“每行一个 selection”，所以先 `collectColumnLines()` 采集每行的
+左右字节位置与虚拟空格列数，再按从左到右的顺序逐行 `SETTARGETRANGE`+`REPLACETARGET`，
+用 `totalDiff` 累计前面各行造成的位移；越过行尾的部分先把虚拟空格补成真实空格再替换。
+改写完成后按原 order 回填选区，若虚拟空格行被“实现”导致选区被收回，则用首尾两行的角点重建矩形。
+数字模式支持十/八/十六/二进制、`none`（尾部补空格）/`zeros`/`spaces` 三种开头补齐、
+十六进制大小写，以及“同一个数字连续占 N 行”的重复次数；对齐宽度取首末两个值的最大位数。
+
+**没有列选区时**，列编辑器沿用 Notepad++ 的退化行为：从光标所在行一直写到文档结尾，
+统一插到光标所在的那一列（短行先补空格对齐）。这个行为会改动大量文本，对话框在这种情况下
+会显式提示；整个过程包在一个 undo action 里，Ctrl+Z 一次即可整体撤销。
+
+列与位置的单位不同：`SCI_GETCOLUMN`/`FINDCOLUMN` 里的列按**字符**计（一个汉字算 1 列），
+而 position 按**字节**。端口全程在字节层拼接文本，只在需要定位列时做一次转换，
+因此 UTF-8/CJK 混排不会错位。
+
+与 Notepad++ 有两处有意偏差：“重复次数”固定按十进制解析（不随所选进制变化，避免“10 进制下填 10
+表示重复 2 行”这类反直觉行为），以及数字字段给出 1/1/1 的默认值而不是留空。
+
+## 打印
+
+“文件 > 打印”（Ctrl+P）走系统打印对话框（CUPS），输出为等宽字体的纯文本：左侧行号栏、
+制表符按 `tabWidth` 展开到列边界、超出页宽的行直接截断（与 Notepad++ 默认“打印不折行”一致）。
+分页与列展开的排版逻辑在 `src/utils/PrintHelper.cpp`，与 `QPrinter` / 对话框解耦，
+因此可以用 `QPdfWriter` 离线验证而不产生真实的打印任务。当前不打印语法高亮颜色，也不支持“仅打印选区”。
+
+## 工具栏图标
+
+形态取自 [Lucide](https://lucide.dev)（ISC 许可），
+源 SVG 已固化在 `resources/icons/toolbar/src/`，因此生成与构建都不依赖外部仓库或系统图标主题。
+例外是 `indent-guide.svg`：Lucide 里没有能准确表达“缩进参考线”的图形（`indent` 是“增加缩进”动作，
+`columns-*` 是分栏），它按 Lucide 的笔触规范（stroke-width=2、圆头端点、24x24 网格）自制。
+
+`tools/gen_toolbar_icons.py`（librsvg + cairo）离线生成两套前景色的 PNG：
+
+- `resources/icons/toolbar/{dark,light}/<name>_{16,32}.png`
+  —— 16px 用于常规 DPI，32px 以 DPR=2 注册用于 HiDPI；
+  `dark`/`light` 分别对应深色（#cfcfcf）与浅色（#4d4d4d）主题。
+- `resources/toolbar.qrc` —— 由同一脚本生成的内嵌清单，运行时路径为 `:/toolbar/<theme>/<name>_<size>.png`。
+
+图标由 `src/utils/ToolbarIcon.cpp` 组装成 `QIcon`，`MainWindow::refreshToolBarIcons()`
+在主题切换时重建（QSS 改不了 `QIcon` 的颜色，必须换资源）。若资源缺失，
+工具栏会自动退回纯文字模式而不是显示空按钮。
+
+改图标形态或新增动作：编辑/添加 `src/` 下的 SVG，然后
+
+```bash
+sudo apt install -y python3-gi python3-gi-cairo gir1.2-rsvg-2
+python3 tools/gen_toolbar_icons.py    # 同时刷新 PNG 和 resources/toolbar.qrc
+cmake -S . -B build && cmake --build build
+```
+
+许可：`resources/icons/toolbar/LICENSE-lucide.txt`（ISC，含 Feather 派生声明），
+随仓库一并保留。
