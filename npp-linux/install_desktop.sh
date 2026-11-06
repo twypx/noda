@@ -34,7 +34,9 @@ dest_icons="$HOME/.local/share/icons/hicolor"
 mkdir -p "$dest_icons"
 cp -r "$here/resources/icons/hicolor/." "$dest_icons/"
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-    gtk-update-icon-cache -q "$dest_icons"
+    # 目录里没有 index.theme 时它返回 2（"No theme index file"）。图标本身不依赖缓存，
+    # 不能因为这个可选的优化失败就让 set -e 中断，否则 .desktop 根本写不出去。
+    gtk-update-icon-cache -q "$dest_icons" >/dev/null 2>&1 || true
 fi
 
 # 2. .desktop：用真实可执行路径替换占位符。
@@ -46,6 +48,9 @@ chmod 644 "$desktop"
 
 if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$desktop" && echo "==> .desktop 校验通过"
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q "$dest_apps" >/dev/null 2>&1 || true
 fi
 
 echo "==> 已注册："

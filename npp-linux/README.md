@@ -105,6 +105,28 @@ tools/register_open_with.py --remove    # 撤销
 `file:///...`，`QFileInfo` 判定不存在，文件会被静默丢弃。缺少字段码时 GIO 报告
 `supports_files=False`，部分应用选择器会据此隐藏该应用。
 
+### 从任务栏点开时鼠标一直转圈？
+
+只在 **X11** 会话下出现：应用已经打开（322ms 就出窗口），但启动器上的转圈指示要等几秒才消失。
+这不是启动慢，而是窗口没被认领到对应的 desktop 文件：
+
+- 窗口的 `WM_CLASS` 是 `"notepad-plus-plus-linux", "Notepad++"`，第二段（res_class）来自
+  `main.cpp` 的 `setApplicationName("Notepad++")`。
+- X11 下 GNOME/KDE 拿 res_class 去反查 `Notepad++.desktop`，查不到；桌面文件又叫
+  `notepad-plus-plus-linux.desktop`，两边对不上，于是新窗口一直挂不上“正在启动”的那个应用，
+  指示器只能等到超时才退出。
+- Wayland 下按 `app_id`（由 `setDesktopFileName()` 设定）匹配，所以没这个问题。
+
+修法是桌面文件里声明 `StartupWMClass=Notepad++`，其值与窗口 WM_CLASS 的 class 段逐字一致。
+改完必须重新安装桌面项才生效：用户级的是 `./install_desktop.sh`（装到
+`~/.local/share/applications`，优先级高于包里的 `/usr/share`），系统级的重装 deb 即可。
+重装后可以用下面两条对一下两边是否还对得上：
+
+```bash
+xprop -id "$(xdotool search --onlyvisible --classname notepad-plus-plus-linux | head -1)" WM_CLASS
+grep ^StartupWMClass= ~/.local/share/applications/notepad-plus-plus-linux.desktop
+```
+
 ## 会话记忆与自动备份
 
 与 Notepad++ 一致：关掉程序再打开，上次打开的标签、光标/选区位置、语言、编码都在；
