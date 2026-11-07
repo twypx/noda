@@ -9,6 +9,7 @@
 #include <QSizeGrip>
 #include "StyleManager.h"
 #include <QMenuBar>
+#include <QMenu>
 #include <QToolBar>
 #include <QStatusBar>
 #include <QFileDialog>
@@ -165,6 +166,15 @@ void MainWindow::setupMenus() {
     setupEncodingMenu();
     setupLanguageMenu();
     setupSettingsMenu();
+
+    // QMenu 的弹出窗口是一个矩形的原生窗口，而样式表里的 border-radius 只能决定 Qt 在窗口内
+    // 怎么画：圆角之外、矩形角落之内的几像素仍会被窗口底色填实，看上去就像圆角菜单外面
+    // 又套了一层直角框。打开逐像素 alpha，让没画到的角落真透明，圆角才立得住。
+    // 菜单全部在上面那几个 setup*Menu() 里建完（没有运行期才 new 的，实测 53 个），
+    // 所以这一趟递归能覆盖到所有层级子菜单。合成器缺失时角落会透出脏像素，但 GNOME/mutter 常驻合成。
+    const auto menus = findChildren<QMenu*>();
+    for (QMenu* m : menus)
+        m->setAttribute(Qt::WA_TranslucentBackground);
 }
 
 void MainWindow::setupTitleBar() {

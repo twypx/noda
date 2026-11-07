@@ -1,11 +1,16 @@
 #include <QApplication>
 #include "MainWindow.h"
 #include "StyleManager.h"
+#include "utils/StartupNotify.h"
 #include <QDir>
 #include <QIcon>
 #include <iostream>
 
 int main(int argc, char* argv[]) {
+    // 抢在 QApplication 之前把 DESKTOP_STARTUP_ID 读走：Qt 的 xcb 平台层
+    // 会在构造时消费它（只写到自己那个隐藏 leader 窗口上），事后再读已是空串。
+    StartupNotify::captureStartupId();
+
     // 强制禁用平台全局菜单，确保菜单栏稳定显示在主窗口内部 (防止 GNOME/Wayland 下菜单栏消失)
     QApplication::setAttribute(Qt::AA_DontUseNativeMenuBar);
 
@@ -70,6 +75,9 @@ int main(int argc, char* argv[]) {
     }
 
     MainWindow window;
+    // X11 下必须赶在映射前把 _NET_STARTUP_ID 写到主窗口上，否则任务栏的转圈
+    // 要等到启动序列超时才停（Qt 自己只写在了它的 SM leader 隐藏窗口上）。
+    StartupNotify::announceBeforeShow(&window);
     window.show();
 
     // 如果命令行传入了文件路径，自动打开

@@ -32,6 +32,9 @@ sudo apt update
 sudo apt install -y build-essential cmake qt6-base-dev qt6-base-dev-tools
 ```
 
+可选：`libxcb1-dev`。装了它会启用 X11 启动通知补漏（把 `_NET_STARTUP_ID` 补写到主窗口上，
+见下文“从任务栏点开时一直转圈”）；没装也只是这一项不生效，构建本身不会失败。
+
 *(如果使用 Qt5 环境，可安装：`sudo apt install -y build-essential cmake qtbase5-dev qtbase5-dev-tools`)*
 
 ## 一键编译与运行
@@ -105,27 +108,66 @@ tools/register_open_with.py --remove    # 撤销
 `file:///...`，`QFileInfo` 判定不存在，文件会被静默丢弃。缺少字段码时 GIO 报告
 `supports_files=False`，部分应用选择器会据此隐藏该应用。
 
-### 从任务栏点开时鼠标一直转圈？
+### 从任务栏点开时一直转圈？
 
-只在 **X11** 会话下出现：应用已经打开（322ms 就出窗口），但启动器上的转圈指示要等几秒才消失。
-这不是启动慢，而是窗口没被认领到对应的 desktop 文件：
+只在 **X11** 会话下出现：窗口 300ms 就出来了，但任务栏图标上的转圈要再等好几秒才停。
+这跟启动速度无关，是**启动通知（startup notification）没有被正常结束**。
 
-- 窗口的 `WM_CLASS` 是 `"notepad-plus-plus-linux", "Notepad++"`，第二段（res_class）来自
-  `main.cpp` 的 `setApplicationName("Notepad++")`。
-- X11 下 GNOME/KDE 拿 res_class 去反查 `Notepad++.desktop`，查不到；桌面文件又叫
-  `notepad-plus-plus-linux.desktop`，两边对不上，于是新窗口一直挂不上“正在启动”的那个应用，
-  指示器只能等到超时才退出。
-- Wayland 下按 `app_id`（由 `setDesktopFileName()` 设定）匹配，所以没这个问题。
+桌面环境启动应用时，会在子进程环境里放一个 `DESKTOP_STARTUP_ID`，并按 EWMH 规范期待
+应用把它写进**自己每个顶层窗口**的 `_NET_STARTUP_ID` 属性；窗口管理器在窗口映射时读到
+这个属性，就认为该启动序列已经完成，转圈随即结束。
 
-修法是桌面文件里声明 `StartupWMClass=Notepad++`，其值与窗口 WM_CLASS 的 class 段逐字一致。
-改完必须重新安装桌面项才生效：用户级的是 `./install_desktop.sh`（装到
-`~/.local/share/applications`，优先级高于包里的 `/usr/share`），系统级的重装 deb 即可。
-重装后可以用下面两条对一下两边是否还对得上：
+**Qt6 的 xcb 平台层没有遵守这个约定**：它只把属性写在自己那个 SM client leader 隐藏
+窗口上，真正的主窗口上一个字都没有，于是序列只能挂到超时。实测（`LD_PRELOAD` 拦
+`xcb_change_property`，日志见下）：
+
+```
+win=0x05600008 prop=_NET_STARTUP_ID ...   <- Qt 写的：SM leader 窗口（有 SM_CLIENT_ID / WM_CLIENT_LEADER）
+win=0x05600006 prop=WM_CLASS / _NET_WM_ICON / _NET_WM_NAME='new 1 - Notepad++ (Linux)'   <- 主窗口，没有启动 id
+```
+
+修法是应用侧补上这一步，见 `src/utils/StartupNotify.*`：`main()` 在构造 QApplication **之前**
+先把 `DESKTOP_STARTUP_ID` 读走（Qt 会在构造时把它消费掉，事后 `qgetenv` 已是空串），
+再在 `show()` **之前**把它写到主窗口的原生句柄上（`winId()` 只建窗口不映射，正好满足
+“属性先于映射就位”）。少了先后顺序里的任何一个，这个补漏都等于没做。
+
+另一个必要的配套是桌面文件里的 `StartupWMClass=Notepad++`：窗口的
+`WM_CLASS` 是 `"notepad-plus-plus-linux", "Notepad++"`，第二段来自
+`main.cpp` 的 `setApplicationName("Notepad++")`，与桌面文件名对不上；GNOME 用
+`StartupWMClass` 来决定窗口归到哪个应用，这关系到图标合并与分组。改完必须重新安装
+桌面项才生效（用户级 `./install_desktop.sh` 优先级高于包里的 `/usr/share`）。
+
+Wayland 会话下既没有 `_NET_STARTUP_ID` 也不看 `WM_CLASS`，靠 `app_id`
+（由 `setDesktopFileName()` 设定）识别，所以不受影响。
+
+验证补漏有没有生效——从桌面入口启动后，主窗口上应该**读不到**这个属性（说明窗口
+管理器已经取走并结束了序列），而不是从来没写过：
 
 ```bash
-xprop -id "$(xdotool search --onlyvisible --classname notepad-plus-plus-linux | head -1)" WM_CLASS
+W=$(xdotool search --onlyvisible --class notepad-plus-plus-linux | head -1)
+xprop -id "$W" WM_CLASS _NET_STARTUP_ID     # 期望 WM_CLASS 有值、_NET_STARTUP_ID: not found
 grep ^StartupWMClass= ~/.local/share/applications/notepad-plus-plus-linux.desktop
 ```
+
+### 弹出菜单的圆角外面又套了一层直角框？
+
+样式表里 `QMenu` 写了 `border-radius: 6px`，但菜单四个角看上去仍被直角包着。
+
+原因：`QMenu` 弹出时是一个**独立的矩形原生窗口**，`border-radius` 只能决定 Qt 在这个
+窗口内怎么画，改变不了窗口自身的形状。圆角之外、矩形角落之内的那几像素会被窗口底色
+填实，于是成了「圆角套在直角里」。不是又多包了一层控件。
+
+修法：`MainWindow::setupMenus()` 末尾给所有 `QMenu`（实测 53 个，含各级子菜单）打开
+`Qt::WA_TranslucentBackground`，让弹出窗口拿到 32 位 ARGB 视觉，没画到的角落就是真透明。
+
+验证：弹出窗口的 Depth 应为 32；且角落像素应该等于它背后的内容而不是菜单自己的底色：
+
+```bash
+xwininfo -id <弹出窗口 id> -stats | grep Depth        # 期望 32
+```
+
+注意这依赖合成器（GNOME/mutter 常驻合成）。在没有合成器的窗口管理器下，透明角落会
+透出脏像素；那种环境下去掉 `QMenu` 的 `border-radius` 比保留它更稳。
 
 ## 会话记忆与自动备份
 
@@ -315,6 +357,15 @@ Notepad++ 一致，是“空格与制表符”+“换行符”两个开关的合
 图标由 `src/utils/ToolbarIcon.cpp` 组装成 `QIcon`，`MainWindow::refreshToolBarIcons()`
 在主题切换时重建（QSS 改不了 `QIcon` 的颜色，必须换资源）。若资源缺失，
 工具栏会自动退回纯文字模式而不是显示空按钮。
+
+另有两处不走 `QIcon`，得自己按屏幕 DPR 取图，否则 HiDPI 屏上会发糊
+（`QIcon` 会随窗口 DPR 自动在 16/32 之间择一，QSS 的 `image:` 和裸 `QPixmap` 都不会）：
+
+- 标签右侧的关闭按钮：样式表里写 `image: url(...x_16.png)` 的话，2x 屏上等于把 16px 原图
+  拉成 32 物理像素。`ThemeManager::closeButtonImage()` 按 DPR 在两张图里选一张并锁定 16px
+  逻辑盒，样式串里以 `@CLOSE_BUTTON_IMAGE@` 占位，`getStyleSheet()` 返回前替换。
+- 自绘标题栏最左侧的应用图标：`QLabel::setScaledContents(true)` 会把 pixmap 铺满 20px 逻辑盒，
+  所以 `TitleBar` 用 `icon.pixmap(20 * dpr)` 再 `setDevicePixelRatio(dpr)`，而不是 `icon.pixmap(20, 20)`。
 
 改图标形态或新增动作：编辑/添加 `src/` 下的 SVG，然后
 

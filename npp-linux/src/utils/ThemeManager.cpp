@@ -3,13 +3,39 @@
 #include <QStyleFactory>
 #include <QPalette>
 
+namespace {
+
+// QSS 的 image: 只认固定像素的 PNG，没有 DPR 概念。标签关闭按钮原来直接写死 x_16.png，
+// 2x 屏上它被按逻辑 16px（= 物理 32px）绘制，等于把 16px 原图拉大一倍，看着就是糊的；
+// 工具栏里同一枚 x 走的是 toolBarIcon() 的 QIcon + setDevicePixelRatio(2)，一直清晰，
+// 两边不一致。
+// gen_toolbar_icons.py 本来就同时产出 _16/_32 两套，这里按屏幕 DPR 选一张，
+// 并把逻辑盒锁在 16px，这样 32px 源图正好 1:1 落在物理像素上。
+QString closeButtonImage(bool isDark) {
+    const QString dir = isDark ? QStringLiteral("dark") : QStringLiteral("light");
+    const qreal dpr = qApp ? qApp->devicePixelRatio() : 1.0;
+    if (dpr <= 1.01)
+        return QStringLiteral("image: url(:/toolbar/%1/x_16.png);").arg(dir);
+    return QStringLiteral(
+        "image: url(:/toolbar/%1/x_32.png);\n"
+        "                width: 16px;\n"
+        "                height: 16px;").arg(dir);
+}
+
+// 样式表里带 DPR 的占位符在这里落地。必须在拿到 isDark 之后、setStyleSheet 之前做。
+QString finishStyleSheet(const QString& css, bool isDark) {
+    return QString(css).replace(QStringLiteral("@CLOSE_BUTTON_IMAGE@"), closeButtonImage(isDark));
+}
+
+}   // namespace
+
 QString ThemeManager::getStyleSheet(bool isDark) {
     if (isDark) {
         // Obsidian Dark Mode (CDP Probed Design Tokens)
         // Background primary: #1C1C1C, secondary: #282828, border: #333333
         // Text normal: #dadada, muted: #b3b3b3, faint: #666666
         // Accent: #a882ff (Obsidian iconic purple)
-        return R"(
+        return finishStyleSheet(R"(
             /* 全局主窗口外边框 (叠在其他窗口上时可看清程序边界) */
             QMainWindow {
                 background-color: #282828;
@@ -171,8 +197,9 @@ QString ThemeManager::getStyleSheet(bool isDark) {
             }
             QTabBar::close-button {
                 /* 必须显式给 image：QSS 里一旦出现 close-button 规则，Qt 就接管这个
-                   子控件的绘制，不再回退到平台默认的关闭图标，没有 image 时 X 整块空白。 */
-                image: url(:/toolbar/dark/x_16.png);
+                   子控件的绘制，不再回退到平台默认的关闭图标，没有 image 时 X 整块空白。
+                   具体引哪张 PNG 由 closeButtonImage() 按屏幕 DPR 填，写死 _16 会在 HiDPI 下发糊。 */
+                @CLOSE_BUTTON_IMAGE@
                 subcontrol-position: center right;
                 padding: 2px;
             }
@@ -273,13 +300,13 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 padding: 0 6px;
                 color: #a882ff;
             }
-        )";
+        )", isDark);
     } else {
         // Obsidian Light Mode (CDP Probed Design Tokens)
         // Background primary: #ffffff, secondary: #f6f6f6, border: #e4e4e4
         // Text normal: #222222, muted: #5c5c5c, faint: #ababab
         // Accent: #7852ee (Obsidian purple)
-        return R"(
+        return finishStyleSheet(R"(
             /* 全局主窗口外边框 (叠在其他窗口上时可看清程序边界) */
             QMainWindow {
                 background-color: #f6f6f6;
@@ -438,8 +465,9 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 font-weight: bold;
             }
             QTabBar::close-button {
-                /* 同上：没有 image 的 close-button 规则会把 X 画成空白。 */
-                image: url(:/toolbar/light/x_16.png);
+                /* 同上：没有 image 的 close-button 规则会把 X 画成空白；
+                   带 DPR 的图由 closeButtonImage() 填入。 */
+                @CLOSE_BUTTON_IMAGE@
                 subcontrol-position: center right;
                 padding: 2px;
             }
@@ -540,7 +568,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 padding: 0 6px;
                 color: #7852ee;
             }
-        )";
+        )", isDark);
     }
 }
 

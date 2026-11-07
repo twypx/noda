@@ -141,6 +141,7 @@ set(APP_SOURCES
     src/utils/ThemeManager.cpp
     src/utils/PrintHelper.cpp
     src/utils/ToolbarIcon.cpp
+    src/utils/StartupNotify.cpp
 )
 
 add_executable(notepad-plus-plus-linux
@@ -166,6 +167,22 @@ target_link_libraries(notepad-plus-plus-linux PRIVATE
     uchardet
     pugixml
 )
+
+# X11 启动通知（把 _NET_STARTUP_ID 写到主窗口上，消除任务栏转圈）需要直接用 libxcb。
+# 做成可选：没有 libxcb1-dev 时只是这个补漏不生效（行为退回 Qt 原生那套），
+# 不能让一个体验细节把整个工程卡住，Wayland/mac 等平台上也根本没有 xcb。
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(XCB QUIET xcb)
+endif()
+if(XCB_FOUND)
+    target_compile_definitions(notepad-plus-plus-linux PRIVATE NPP_HAVE_XCB=1)
+    target_link_libraries(notepad-plus-plus-linux PRIVATE ${XCB_LIBRARIES})
+    target_include_directories(notepad-plus-plus-linux PRIVATE ${XCB_INCLUDE_DIRS})
+    message(STATUS "找到 libxcb（${XCB_VERSION}）：启用 X11 启动通知补漏")
+else()
+    message(STATUS "未找到 libxcb（可装 libxcb1-dev）：跳过 X11 启动通知补漏")
+endif()
 
 message(STATUS "Notepad++ (Linux Port) CMake configuration ready.")
 
