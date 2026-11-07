@@ -134,6 +134,9 @@ MainWindow::MainWindow(QWidget* parent)
     });
     // 标签被销毁时删掉它的备份，不然 backup/ 下会留一堆没人引用的孤儿文件。
     connect(_tabManager, &TabManager::editorClosing, this, &MainWindow::dropBackup);
+    // 双击标签栏空白处新建文档（上游 Notepad++ 的同一手势）。走 onNewFile 而不是直接
+    // createNewTab()，新建的文档才会带上首选项里的默认 EOL / 编码。
+    connect(_tabManager, &TabManager::blankAreaActivated, this, &MainWindow::onNewFile);
     connect(_fileWatcher, &QFileSystemWatcher::fileChanged, this, &MainWindow::onFileChangedOnDisk);
 
     _backupTimer = new QTimer(this);

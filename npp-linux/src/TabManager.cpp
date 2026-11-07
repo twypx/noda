@@ -1,5 +1,6 @@
 #include "TabManager.h"
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QTabBar>
 
 TabManager::TabManager(QWidget* parent) : QTabWidget(parent) {
@@ -9,6 +10,22 @@ TabManager::TabManager(QWidget* parent) : QTabWidget(parent) {
 
     connect(this, &QTabWidget::tabCloseRequested, this, &TabManager::onTabCloseRequested);
     connect(this, &QTabWidget::currentChanged, this, &TabManager::onCurrentChanged);
+}
+
+void TabManager::mouseDoubleClickEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        // 标签栏的宽度只等于标签本身那一段（QSS 没让它铺满），它右边到窗口边缘的空白
+        // 落在 QTabWidget 自己身上：竖坐标在标签那一行里、横坐标在标签栏右侧，就是空白区。
+        // 双击标签本身仍由 QTabBar 处理，不会跑到这里；编辑区的双击也被 EditorView 吃掉。
+        const QRect barRect = tabBar()->geometry();
+        const QPoint pos = event->position().toPoint();
+        if (pos.y() >= barRect.top() && pos.y() <= barRect.bottom() && pos.x() > barRect.right()) {
+            emit blankAreaActivated();
+            event->accept();
+            return;
+        }
+    }
+    QTabWidget::mouseDoubleClickEvent(event);
 }
 
 EditorView* TabManager::currentEditor() const {

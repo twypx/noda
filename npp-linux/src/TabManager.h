@@ -4,6 +4,8 @@
 #include <QStringList>
 #include "EditorView.h"
 
+class QMouseEvent;
+
 class TabManager : public QTabWidget {
     Q_OBJECT
 public:
@@ -42,6 +44,13 @@ signals:
     // 标签即将被销毁：会话快照的备份文件要在这时删掉，否则会变成无人引用的孤儿文件。
     void editorClosing(EditorView* editor);
     void tabTitleChanged(int index);
+    // 双击标签栏空白处（复刻上游 Notepad++ 的同一手势）。真正新建文档由 MainWindow 做，
+    // 这样才能带上首选项里的默认 EOL / 编码。
+    void blankAreaActivated();
+
+protected:
+    // 双击标签栏右侧的空白区（标签栏只占标签那一段宽度，右边空白落在 QTabWidget 上）。
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
 
 private slots:
     void onTabCloseRequested(int index);
