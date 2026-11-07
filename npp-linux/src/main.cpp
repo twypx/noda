@@ -75,10 +75,12 @@ int main(int argc, char* argv[]) {
     }
 
     MainWindow window;
-    // X11 下必须赶在映射前把 _NET_STARTUP_ID 写到主窗口上，否则任务栏的转圈
-    // 要等到启动序列超时才停（Qt 自己只写在了它的 SM leader 隐藏窗口上）。
+    // X11 下必须赶在映射前把 _NET_STARTUP_ID 写到主窗口上（Qt 自己只写在了它的 SM leader 隐藏窗口上）。
     StartupNotify::announceBeforeShow(&window);
     window.show();
+    // 映射后主动告诉启动器“这次启动好了”。不发这一步，任务栏/应用列表那里建的启动序列
+    // 一直没人接，转圈要等到 15 秒超时才停（实测），而且转圈期间再点图标也开不了。
+    StartupNotify::notifyComplete();
 
     // 如果命令行传入了文件路径，自动打开
     QStringList args = app.arguments();
