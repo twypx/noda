@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 把应用图标与 .desktop 注册到当前用户（无需 root），让 GNOME/KDE 的任务栏、
-# 活动总览、应用列表显示 notepad++.png 经 iOS 风格处理后生成的图标。
+# 活动总览、应用列表显示 notepad++_cutout.png 生成的透明背景图标。
 #
 # 用法：
 #   ./install_desktop.sh [可执行文件绝对路径]

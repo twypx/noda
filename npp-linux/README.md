@@ -253,9 +253,9 @@ dry-run 下自动改写的版本号会留在工作区但不提交，正式发版
 
 ## 应用图标
 
-图标源文件为 `notepad++.png`（1024x1024 官方 logo），由 `tools/gen_icons.py`（Pillow）
-离线加工成 **iOS 风格** 图标：超椭圆（squircle，Lamé 曲线 n=5）切角、把原图近黑底色软色键
-替换为绿色渐变、给纸面加悬浮投影、叠加顶部高光与内侧亮边。
+图标源文件为 `notepad++_cutout.png`（透明抠图），由 `tools/gen_icons.py`（Pillow）
+离线生成透明背景图标：保持宽高比居中缩放，不添加绿色背景、超椭圆切角或高光，
+图标主体就是纸面与变色龙本身。
 
 - `resources/icons/app_master_1024.png` —— 加工后的母图，所有小尺寸由它缩放而来。
 - `resources/icons/app_{16,24,32,48,64,128,256}.png` —— 经 `resources/app.qrc` 内嵌进可执行文件，
@@ -270,7 +270,7 @@ sudo apt install -y python3-pil
 python3 tools/gen_icons.py
 ```
 
-色调、切角、投影、高光等参数集中在 `tools/gen_icons.py` 顶部的常量区。
+内容占比等参数集中在 `tools/gen_icons.py` 顶部的常量区。
 
 让 GNOME/KDE 任务栏与应用列表识别图标（写入 `~/.local`，无需 root）：
 

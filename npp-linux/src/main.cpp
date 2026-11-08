@@ -19,8 +19,8 @@ int main(int argc, char* argv[]) {
     app.setApplicationName("Notepad++");
     app.setOrganizationName("Notepad++");
 
-    // 应用图标：由 notepad++.png 经 tools/gen_icons.py 加 iOS 风格处理（超椭圆切角 + 绿色渐变底）
-    // 后生成多尺寸 PNG 并内嵌到可执行文件（qrc），
+    // 应用图标：由 notepad++_cutout.png 经 tools/gen_icons.py 生成透明背景多尺寸 PNG
+    // 并内嵌到可执行文件（qrc），
     // 因此不依赖系统 QtSvg 开发包，也不会因为换机器运行而丢图标。
     QIcon appIcon;
     for (int size : {16, 24, 32, 48, 64, 128, 256})
