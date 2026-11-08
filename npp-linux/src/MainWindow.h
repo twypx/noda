@@ -23,6 +23,10 @@
 
 class QToolBar;
 class QTimer;
+class QDragEnterEvent;
+class QDragMoveEvent;
+class QDropEvent;
+class QUrl;
 
 class ClickableLabel : public QLabel {
     Q_OBJECT
@@ -43,6 +47,9 @@ public:
 protected:
     void closeEvent(QCloseEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private slots:
     // 文件菜单
@@ -217,6 +224,7 @@ private:
     void addRecentFile(const QString& path);
     void updateRecentFilesMenu();
     void applyPreferencesToEditor(EditorView* ed);
+    void openDroppedUrl(const QUrl& url);
 
     // ---- 会话快照（session.xml + backup/）----
     // 复刻 Notepad++ 的“记住上次会话 + 周期性备份”：退出时不弹保存询问，

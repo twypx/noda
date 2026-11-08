@@ -15,6 +15,10 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QCloseEvent>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QApplication>
 #include <QClipboard>
 #include <QPalette>
@@ -52,6 +56,14 @@ LineEnding eolFromPref(const QString& s) {
     if (s.contains("CRLF") || s.contains("Windows")) return LineEnding::CRLF;
     if (s.contains("Macintosh") || s.contains("Mac") || s.compare("CR", Qt::CaseInsensitive) == 0) return LineEnding::CR;
     return LineEnding::LF;
+}
+
+bool hasLocalUrl(const QMimeData* mime) {
+    const QList<QUrl> urls = mime->urls();
+    for (const QUrl& url : urls) {
+        if (url.isLocalFile()) return true;
+    }
+    return false;
 }
 
 // 工具栏一项的声明：图标基名 + 中文提示 + 对应槽 + 快捷键（仅用于 tooltip 展示，
@@ -106,6 +118,8 @@ MainWindow::MainWindow(QWidget* parent)
     // 将菜单栏/工具栏/编辑区/状态栏整体内缩 1px，让 QMainWindow 的 1px 样式边框显露出来，
     // 否则子控件会铺满并遮盖边框，叠在其他窗口上时看不到程序边界。
     setContentsMargins(1, 1, 1, 1);
+    // 编辑区由 ScintillaEditBase 自己接收拖放；主窗口覆盖标题栏/标签栏/工具栏/状态栏等其余区域。
+    setAcceptDrops(true);
     setCentralWidget(_tabManager);
     setWindowTitle("Notepad++ (Linux)");
     resize(1080, 780);
@@ -125,6 +139,9 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(_tabManager, &TabManager::editorCreated, this, [this](EditorView* ed) {
         applyPreferencesToEditor(ed);
+        connect(ed, &ScintillaEditBase::uriDropped, this, [this](const QString& uri) {
+            openDroppedUrl(QUrl(uri));
+        });
         // 缓冲区一旦回到“已保存”状态，旧备份必须立刻作废：否则程序被强杀后，
         // session.xml 里记的 backupFilePath 会把旧内容盖回已经保存过的文件。
         // 保存、另存、重新载入、外部修改自动重载都会走 savePointChanged -> 这里。
@@ -677,6 +694,42 @@ void MainWindow::onOpenFile() {
     QString path = QFileDialog::getOpenFileName(this, "打开文件", QString(), "所有文件 (*.*)");
     if (!path.isEmpty()) {
         openFile(path);
+    }
+}
+
+void MainWindow::openDroppedUrl(const QUrl& url) {
+    if (!url.isLocalFile()) return;
+    QFileInfo fi(url.toLocalFile());
+    if (fi.isFile()) {
+        openFile(fi.absoluteFilePath());
+    }
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
+    if (hasLocalUrl(event->mimeData())) {
+        event->acceptProposedAction();
+    } else {
+        QMainWindow::dragEnterEvent(event);
+    }
+}
+
+void MainWindow::dragMoveEvent(QDragMoveEvent* event) {
+    if (hasLocalUrl(event->mimeData())) {
+        event->acceptProposedAction();
+    } else {
+        QMainWindow::dragMoveEvent(event);
+    }
+}
+
+void MainWindow::dropEvent(QDropEvent* event) {
+    if (hasLocalUrl(event->mimeData())) {
+        event->acceptProposedAction();
+        const QList<QUrl> urls = event->mimeData()->urls();
+        for (const QUrl& url : urls) {
+            openDroppedUrl(url);
+        }
+    } else {
+        QMainWindow::dropEvent(event);
     }
 }
 
