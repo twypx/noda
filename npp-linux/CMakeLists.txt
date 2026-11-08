@@ -15,7 +15,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -mtune=generic -flto -DNDEBUG")
 add_compile_options(-include cstdint)
 
 # 寻找 Qt6 (优先) 或 Qt5；PrintSupport 供“文件 > 打印”使用
-find_package(Qt6 COMPONENTS Core Gui Widgets PrintSupport)
+find_package(Qt6 COMPONENTS Core Gui Widgets PrintSupport Concurrent)
 if (Qt6_FOUND)
     if (NOT TARGET Qt6::PrintSupport)
         message(FATAL_ERROR
@@ -23,14 +23,14 @@ if (Qt6_FOUND)
             "请安装: sudo apt install qt6-base-dev（或对应发行版的 qt6-printsupport 开发包）。")
     endif()
     message(STATUS "Found Qt6: version ${Qt6_VERSION}")
-    set(QT_TARGETS Qt6::Core Qt6::Gui Qt6::Widgets Qt6::PrintSupport)
+    set(QT_TARGETS Qt6::Core Qt6::Gui Qt6::Widgets Qt6::PrintSupport Qt6::Concurrent)
     set(CMAKE_AUTOMOC ON)
     set(CMAKE_AUTORCC ON)
     set(CMAKE_AUTOUIC ON)
 else()
-    find_package(Qt5 COMPONENTS Core Gui Widgets PrintSupport REQUIRED)
+    find_package(Qt5 COMPONENTS Core Gui Widgets PrintSupport Concurrent REQUIRED)
     message(STATUS "Found Qt5: version ${Qt5_VERSION}")
-    set(QT_TARGETS Qt5::Core Qt5::Gui Qt5::Widgets Qt5::PrintSupport)
+    set(QT_TARGETS Qt5::Core Qt5::Gui Qt5::Widgets Qt5::PrintSupport Qt5::Concurrent)
     set(CMAKE_AUTOMOC ON)
     set(CMAKE_AUTORCC ON)
     set(CMAKE_AUTOUIC ON)
@@ -62,6 +62,22 @@ add_library(uchardet STATIC ${UCHARDET_SOURCES})
 
 # 2. 编译 pugixml 模块
 add_library(pugixml STATIC "${POWEREDITOR_SRC}/pugixml/pugixml.cpp")
+
+# 2.5 编译 AStyle 代码格式化核心（third_party/astyle，MIT）。
+# 只取 headless 的 ASTYLE_LIB 引擎，支持 C/C++/C#/Java/Objective-C，无 Qt/UI 依赖；
+# 刻意不引入 CoolFormat 的其余引擎（PHP 引擎有二次方拷贝，违背高性能目标）。
+# 引擎按 C++11 编译（与其上游一致），应用侧通过 utils/CodeFormatter 在工作线程调用。
+set(ASTYLE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/astyle)
+add_library(astyle STATIC
+    ${ASTYLE_DIR}/ASBeautifier.cpp
+    ${ASTYLE_DIR}/ASEnhancer.cpp
+    ${ASTYLE_DIR}/ASFormatter.cpp
+    ${ASTYLE_DIR}/ASResource.cpp
+    ${ASTYLE_DIR}/astyle_main.cpp
+)
+target_compile_definitions(astyle PRIVATE ASTYLE_LIB)
+target_include_directories(astyle PRIVATE ${ASTYLE_DIR})
+set_target_properties(astyle PROPERTIES CXX_STANDARD 11)
 
 # 3. 编译 Lexilla 词法高亮引擎
 file(GLOB LEXILLA_LEXLIB_SOURCES "${LEXILLA_DIR}/lexlib/*.cxx")
@@ -141,6 +157,8 @@ set(APP_SOURCES
     src/utils/ThemeManager.cpp
     src/utils/PrintHelper.cpp
     src/utils/ToolbarIcon.cpp
+    src/utils/CodeFormatter.cpp
+    src/utils/JsonFormatter.cpp
     src/utils/StartupNotify.cpp
 )
 
@@ -166,6 +184,7 @@ target_link_libraries(notepad-plus-plus-linux PRIVATE
     lexilla
     uchardet
     pugixml
+    astyle
 )
 
 # X11 启动通知（把 _NET_STARTUP_ID 写到主窗口上，消除任务栏转圈）需要直接用 libxcb。

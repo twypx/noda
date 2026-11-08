@@ -13,6 +13,7 @@
 #include <QSet>
 #include <algorithm>
 #include <vector>
+#include <cctype>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -420,6 +421,53 @@ void EditorView::restoreViewState(int caretPos, int selStart, int selEnd,
         const auto visible = send(SCI_VISIBLEFROMDOCLINE, static_cast<uptr_t>(firstDocLine));
         send(SCI_SETFIRSTVISIBLELINE, static_cast<uptr_t>(visible));
     }
+}
+
+// 格式化只动空白、非空白字符序列不变：统计 before 中 pos 之前的非空白字符数，
+// 再在 after 里定位到“同样多个非空白字符之后”的字节处，即可把光标/视口的逻辑落点映射回去。
+static sptr_t mapPosByNonWhitespace(const std::string& before, sptr_t pos, const std::string& after) {
+    if (pos <= 0) return 0;
+    size_t target = 0;
+    const size_t limit = qMin(static_cast<size_t>(pos), before.size());
+    for (size_t i = 0; i < limit; ++i)
+        if (!std::isspace(static_cast<unsigned char>(before[i]))) ++target;
+    size_t count = 0;
+    for (size_t j = 0; j < after.size(); ++j) {
+        if (count == target) return static_cast<sptr_t>(j);
+        if (!std::isspace(static_cast<unsigned char>(after[j]))) ++count;
+    }
+    return static_cast<sptr_t>(after.size());
+}
+
+void EditorView::applyFormattedText(const std::string& formattedUtf8) {
+    const std::string before = currentTextUtf8();
+    if (before == formattedUtf8) return;
+
+    const sptr_t caret = send(SCI_GETCURRENTPOS);
+    const sptr_t firstLine = send(SCI_GETFIRSTVISIBLELINE);
+    const sptr_t firstLinePos = send(SCI_POSITIONFROMLINE, static_cast<uptr_t>(firstLine));
+    const int xOffset = static_cast<int>(send(SCI_GETXOFFSET));
+    const bool wrapped = send(SCI_GETWRAPMODE) != SC_WRAP_NONE;
+
+    const sptr_t newCaret = mapPosByNonWhitespace(before, caret, formattedUtf8);
+    const sptr_t newFirstPos = mapPosByNonWhitespace(before, firstLinePos, formattedUtf8);
+
+    // 整篇替换包在一个撤销动作里：一次 Ctrl+Z 即可回到格式化前。
+    send(SCI_BEGINUNDOACTION);
+    sends(SCI_SETTEXT, 0, formattedUtf8.c_str());
+    send(SCI_ENDUNDOACTION);
+
+    // 同 restoreViewState：用 SETANCHOR/SETCURRENTPOS + CANCEL，避开 GOTOPOS/SCROLLCARET
+    // 顺带重算滚动，把下面刚还原的视口再次覆盖掉。
+    send(SCI_SETANCHOR, static_cast<uptr_t>(newCaret));
+    send(SCI_SETCURRENTPOS, newCaret);
+    send(SCI_CANCEL);
+
+    if (!wrapped && xOffset > 0) send(SCI_SETXOFFSET, static_cast<uptr_t>(xOffset));
+    const sptr_t newFirstLine = send(SCI_LINEFROMPOSITION, static_cast<uptr_t>(newFirstPos));
+    send(SCI_SETFIRSTVISIBLELINE, static_cast<uptr_t>(newFirstLine));
+
+    updateLineNumberMarginWidth();
 }
 
 bool EditorView::saveToFile(const QString& savePath) {

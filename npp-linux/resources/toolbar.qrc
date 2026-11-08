@@ -30,6 +30,8 @@
     <file alias="search_32.png">icons/toolbar/dark/search_32.png</file>
     <file alias="undo-2_16.png">icons/toolbar/dark/undo-2_16.png</file>
     <file alias="undo-2_32.png">icons/toolbar/dark/undo-2_32.png</file>
+    <file alias="wand-2_16.png">icons/toolbar/dark/wand-2_16.png</file>
+    <file alias="wand-2_32.png">icons/toolbar/dark/wand-2_32.png</file>
     <file alias="wrap-text_16.png">icons/toolbar/dark/wrap-text_16.png</file>
     <file alias="wrap-text_32.png">icons/toolbar/dark/wrap-text_32.png</file>
     <file alias="x_16.png">icons/toolbar/dark/x_16.png</file>
@@ -70,6 +72,8 @@
     <file alias="search_32.png">icons/toolbar/light/search_32.png</file>
     <file alias="undo-2_16.png">icons/toolbar/light/undo-2_16.png</file>
     <file alias="undo-2_32.png">icons/toolbar/light/undo-2_32.png</file>
+    <file alias="wand-2_16.png">icons/toolbar/light/wand-2_16.png</file>
+    <file alias="wand-2_32.png">icons/toolbar/light/wand-2_32.png</file>
     <file alias="wrap-text_16.png">icons/toolbar/light/wrap-text_16.png</file>
     <file alias="wrap-text_32.png">icons/toolbar/light/wrap-text_32.png</file>
     <file alias="x_16.png">icons/toolbar/light/x_16.png</file>

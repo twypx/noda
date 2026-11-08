@@ -39,6 +39,9 @@ public:
     // 这些由调用方按 session.xml 里记录的值回填，才能保证下次保存仍按原编码写回。
     std::string currentTextUtf8() const;
     void setTextFromUtf8(const std::string& utf8);
+    // 用格式化结果整篇替换：单步可撤销，并把光标/视口按“非空白字符序号”映射回原逻辑位置。
+    // 仅接受只改空白的结果；与当前内容相同则不做任何事。
+    void applyFormattedText(const std::string& formattedUtf8);
     // 还原上次的光标/选区/滚动位置。firstDocLine 是折行前的文档行号，
     // xOffset 是横向滚动偏移（非自动换行时生效）。
     void restoreViewState(int caretPos, int selStart, int selEnd, int firstDocLine, int xOffset);

@@ -32,7 +32,9 @@
 #include <QPrinter>
 #include <QPrintDialog>
 #include <QTimer>
+#include <QtConcurrent/QtConcurrentRun>
 #include <vector>
+#include "utils/CodeFormatter.h"
 
 namespace {
 // 写盘期间临时解除对该路径的 inotify 监视，析构后恢复，避免自身保存触发“外部修改”假警报。
@@ -345,6 +347,10 @@ void MainWindow::setupEditMenu() {
     blankMenu->addAction("移除空行(包括空白字符)", [this]() { onRemoveEmptyLines(true); });
 
     menu->addSeparator();
+    auto* formatAct = menu->addAction("代码格式化(&F)", this, &MainWindow::onFormatCode);
+    formatAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F));
+
+    menu->addSeparator();
     // 列选模式入口：前者只讲怎么进入列选，后者真正改写列内容。
     menu->addAction("列选模式...", this, &MainWindow::onColumnModeTip);
     menu->addAction("列编辑器(&N)...", QKeySequence(Qt::ALT | Qt::Key_C), this, &MainWindow::onColumnEditor);
@@ -592,6 +598,8 @@ void MainWindow::setupToolBar() {
         {"",                "",         nullptr,                       QKeySequence()},
         {"search",          "查找",     &MainWindow::onFind,           QKeySequence::Find},
         {"replace",         "替换",     &MainWindow::onReplace,        QKeySequence(Qt::CTRL | Qt::Key_H)},
+        {"",                "",         nullptr,                       QKeySequence()},
+        {"wand-2",          "代码格式化", &MainWindow::onFormatCode,     QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F)},
         {"",                "",         nullptr,                       QKeySequence()},
         {"zoom-in",         "放大",     &MainWindow::onZoomIn,         QKeySequence(Qt::CTRL | Qt::Key_Equal)},
         {"zoom-out",        "缩小",     &MainWindow::onZoomOut,        QKeySequence(Qt::CTRL | Qt::Key_Minus)},
@@ -1110,6 +1118,55 @@ void MainWindow::onTabsToSpaces() { if (auto* ed = _tabManager->currentEditor())
 void MainWindow::onSpacesToTabs() { if (auto* ed = _tabManager->currentEditor()) ed->spacesToTabs(_prefs.tabWidth); }
 void MainWindow::onRemoveEmptyLines(bool onlyBlank) { if (auto* ed = _tabManager->currentEditor()) ed->removeEmptyLines(onlyBlank); }
 void MainWindow::onToggleReadOnly(bool ro) { if (auto* ed = _tabManager->currentEditor()) ed->setReadOnly(ro); }
+
+void MainWindow::onFormatCode() {
+    if (_formatBusy) return;
+    EditorView* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    if (ed->isReadOnly()) {
+        statusBar()->showMessage(QStringLiteral("当前文件为只读，无法格式化"), 3000);
+        return;
+    }
+    const std::string langId = ed->currentLanguage();
+    if (!CodeFormatter::isSupported(langId)) {
+        statusBar()->showMessage(QStringLiteral("代码格式化仅支持 C/C++/C#/Java/Objective-C/JSON"), 4000);
+        return;
+    }
+    auto input = std::make_shared<const std::string>(ed->currentTextUtf8());
+    if (input->empty()) return;
+
+    _formatTarget = ed;
+    _formatInput = input;
+    _formatBusy = true;
+    statusBar()->showMessage(QStringLiteral("正在格式化…"));
+
+    if (!_formatWatcher) {
+        _formatWatcher = new QFutureWatcher<std::string>(this);
+        connect(_formatWatcher, &QFutureWatcher<std::string>::finished,
+                this, &MainWindow::onFormatFinished);
+    }
+    // 格式化是同步阻塞调用（AStyle 1MB 约 0.7s；JSON 流式更快），必须放工作线程，绝不卡 UI。
+    _formatWatcher->setFuture(QtConcurrent::run([input, langId]() {
+        return CodeFormatter::format(*input, langId);
+    }));
+}
+
+void MainWindow::onFormatFinished() {
+    _formatBusy = false;
+    statusBar()->clearMessage();
+    const std::string result = _formatWatcher->future().result();
+    QPointer<EditorView> target = _formatTarget;
+    std::shared_ptr<const std::string> input = _formatInput;
+    _formatTarget.clear();
+    _formatInput.reset();
+
+    if (!target || !input) return;      // 任务期间标签页已关闭
+    if (result.empty()) return;         // 引擎失败：按未改动处理
+    // 任务期间用户若改动了文档，丢弃结果，避免覆盖其编辑。
+    if (target->currentTextUtf8() != *input) return;
+    if (result == *input) return;       // 本就无需改动
+    target->applyFormattedText(result);
+}
 
 void MainWindow::onBeginEndSelect(bool columnMode) {
     auto* ed = _tabManager->currentEditor();

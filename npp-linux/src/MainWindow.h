@@ -10,7 +10,11 @@
 #include <QPair>
 #include <map>
 #include <functional>
+#include <memory>
+#include <string>
 #include <QStringList>
+#include <QPointer>
+#include <QFutureWatcher>
 #include "TabManager.h"
 #include "SessionManager.h"
 #include "dialogs/FindReplaceDialog.h"
@@ -115,6 +119,8 @@ private slots:
     void onSpacesToTabs();
     void onRemoveEmptyLines(bool onlyBlank);
     void onToggleReadOnly(bool ro);
+    void onFormatCode();
+    void onFormatFinished();
 
     // 列选模式与列编辑器
     void onBeginEndSelect(bool columnMode); // 两点定块：第一次记起点，第二次拉出选区
@@ -284,4 +290,11 @@ private:
 
     // 列编辑器的上次参数：重开对话框时保留输入（同 Notepad++）。
     ColumnEditorParams _colEditParams;
+
+    // 代码格式化（AStyle）：耗时的格式化放工作线程，同一时刻只跑一个任务。
+    // _formatInput 与任务共享同一份输入快照，完成时用它比对文档是否被改动过。
+    bool _formatBusy{false};
+    QFutureWatcher<std::string>* _formatWatcher{nullptr};
+    QPointer<EditorView> _formatTarget;
+    std::shared_ptr<const std::string> _formatInput;
 };
