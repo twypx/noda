@@ -220,6 +220,41 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 padding: 2px 8px;
             }
 
+            /* 左侧文件夹树停靠窗 */
+            QDockWidget {
+                background-color: #282828;
+                color: #d4d4d4;
+                border: 0px;
+            }
+            QDockWidget::title {
+                background-color: #2f2f2f;
+                color: #cfcfcf;
+                padding: 5px 8px;
+                border-bottom: 1px solid #3a3a3a;
+                text-align: left;
+            }
+            QTreeView {
+                background-color: #252525;
+                color: #d4d4d4;
+                border: 0px;
+                outline: 0;
+                show-decoration-selected: 1;
+            }
+            QTreeView::item {
+                padding: 2px 4px;
+                min-height: 20px;
+            }
+            QTreeView::item:hover {
+                background-color: #333333;
+            }
+            QTreeView::item:selected {
+                background-color: #3d3550;
+                color: #ffffff;
+            }
+            QTreeView::branch {
+                background-color: transparent;
+            }
+
             /* 滚动条 (Obsidian 纤细流线风格) */
             QScrollBar:vertical {
                 background: transparent;
@@ -486,6 +521,41 @@ QString ThemeManager::getStyleSheet(bool isDark) {
             QStatusBar QLabel {
                 color: #5c5c5c;
                 padding: 2px 8px;
+            }
+
+            /* 左侧文件夹树停靠窗 */
+            QDockWidget {
+                background-color: #f6f6f6;
+                color: #333333;
+                border: 0px;
+            }
+            QDockWidget::title {
+                background-color: #eeeeee;
+                color: #444444;
+                padding: 5px 8px;
+                border-bottom: 1px solid #e0e0e0;
+                text-align: left;
+            }
+            QTreeView {
+                background-color: #ffffff;
+                color: #333333;
+                border: 0px;
+                outline: 0;
+                show-decoration-selected: 1;
+            }
+            QTreeView::item {
+                padding: 2px 4px;
+                min-height: 20px;
+            }
+            QTreeView::item:hover {
+                background-color: #f0edf8;
+            }
+            QTreeView::item:selected {
+                background-color: #ddd3f5;
+                color: #1f1f1f;
+            }
+            QTreeView::branch {
+                background-color: transparent;
             }
 
             /* 滚动条 (Obsidian 纤细流线风格) */

@@ -23,6 +23,12 @@
    - [x] 毫秒级查找与替换（区分大小写、全字匹配、正则支持、全部替换）
    - [x] 磁盘文件外部修改实时监控与重载提醒（Linux `inotify` 驱动）
    - [x] 会话记忆与未保存内容自动备份（关闭后重开可原样恢复，见下节）
+   - [x] 代码格式化：C/C++/C#/Java/Objective-C 走 AStyle，JSON 走保序流式美化器，耗时计算放工作线程
+   - [x] 语言样式配置器：按「语言 × 样式槽位」编辑颜色、粗斜体、字体族与字号并持久化
+   - [x] 快捷键映射器：表格由真实菜单动作生成，可编辑、有冲突检测、可恢复默认
+   - [x] 保存/拷贝另存为的事务化写入与失败显式提示（不会静默写错编码）
+   - [x] 语法配置加载诊断：缺文件或解析失败时明确报告原因、搜索路径与后果
+   - [x] 打开文件夹：选择本地目录后在左侧停靠窗展示目录树，点击文件在主区域打开（惰性加载、零全量预扫描）
 
 ## 编译环境依赖
 
@@ -55,7 +61,7 @@ cd npp-linux
 ./build_deb.sh
 
 # 安装（用 apt 而不是 dpkg -i，缺依赖时会自动补齐）
-sudo apt install ./build-deb/notepad-plus-plus-linux_1.0.0-1_amd64.deb
+sudo apt install ./build-deb/notepad-plus-plus-linux_1.0.8-1_amd64.deb
 ```
 
 产物为 `build-deb/notepad-plus-plus-linux_<版本>-1_<架构>.deb`（约 2.7 MB），按 Debian 政策装到标准位置：
@@ -286,11 +292,11 @@ python3 tools/gen_icons.py
 
 ## 工具栏
 
-工具栏为纯图标模式，19 个动作分 6 组（组间用分隔符）：
+工具栏为纯图标模式，20 个动作分 6 组（组间用分隔符）：
 
 | 分组 | 动作 |
 |---|---|
-| 文件 | 新建 · 打开 · 保存 · 全部保存 · 关闭 · 全部关闭 · 打印 |
+| 文件 | 新建 · 打开 · 打开文件夹 · 保存 · 全部保存 · 关闭 · 全部关闭 · 打印 |
 | 剪贴板 | 剪切 · 复制 · 粘贴 |
 | 撤销 | 撤销 · 恢复 |
 | 搜索 | 查找 · 替换 |
@@ -390,3 +396,105 @@ cmake -S . -B build && cmake --build build
 
 许可：`resources/icons/toolbar/LICENSE-lucide.txt`（ISC，含 Feather 派生声明），
 随仓库一并保留。
+
+## 回归测试（TDD）
+
+```bash
+cd npp-linux
+./tests/run_tests.sh
+```
+
+`CMakeLists.txt` 里 `NPP_BUILD_TESTS` 默认 OFF，不影响 `build.sh` / `build_deb.sh` / CPack。
+`run_tests.sh` 显式打开它，用 `OBJECT` 库 `npp_core` 复用应用源码的对象文件（不重复编译 22 个 `.cpp`），
+只构建 `npp_tests` 目标，避免每次迭代都触发主程序的 LTO 链接。由于 `npp_core` 含
+`CodeFormatter.cpp` / `JsonFormatter.cpp`，测试目标也显式链接了 `astyle`。
+
+- 框架：Qt6 Test + CTest，单个可执行文件 `npp_tests`，`tests/test_main.cpp` 依次运行各测试类。
+- 隔离：`QT_QPA_PLATFORM=offscreen`；`XDG_CONFIG_HOME` 指向 `build/test-config` 并在每次运行前清空，
+  所以 `QSettings` 不会碰到 `~/.config/Notepad++/Notepad++.conf`。
+- `TestV108Baseline` 专门锁住 v1.0.7 / v1.0.8 的 AStyle / JSON 格式化与拖放能力，任何改造都不能让它变红。
+- 覆盖：编码转换与失败语义、保存/拷贝另存为事务性、保存失败提示、配置定位与载入报告、
+  样式覆盖序列化与旧格式兼容、样式配置器 UI、快捷键收集/冲突/持久化、折叠幂等与菜单接线、
+  目录树惰性加载契约（1500 文件深层目录零预扫描）、文件激活、主窗口集成、主题与工具栏图标资源。
+
+开发顺序是先写测试跑出红灯，再写实现跑到绿灯；各模块记录见 `docs/开发计划2.md`。
+
+## 保存失败与编码一致性
+
+`EditorView::writeEncodedFile()` 是所有写盘路径的唯一入口：
+
+- `QSaveFile` 先写同目录临时文件，`commit()` 时原子替换；转码失败或写盘失败都 `cancelWriting()`，
+  原文件不会被截断，也不会留下半个文件。
+- `Encoding::*Chunks()` 在 `iconv_open` 失败时**返回 false 且不产出任何字节**。旧实现会把内存 UTF-8
+  原样写出去并照样返回「保存成功」，结果是编码错误的文件却被标成已保存。
+- `saveToFile()` 严格传播失败：不 `SETSAVEPOINT`、不清修改标记、不改文件路径；
+  `lastSaveError()` 给出具体原因（不支持的编码 / 打不开 / 写盘失败 / 提交失败）。
+- `saveCopyToFile()` 与保存共用同一条转码链路，但不动文件路径、savepoint、修改标记与文件监控 ——
+  「拷贝另存为」的 GBK 文档现在得到的是 GBK 副本，而不是 UTF-8 冒充。
+- `MainWindow` 的四个保存入口统一处理失败：发 `saveFailed` 信号 + 带原因的提示框；
+  「全部保存」收集所有失败项，循环结束后汇总一次，避免连续弹框打断批量操作。
+
+## 语法配置加载诊断
+
+`StyleManager::locateConfigFiles()` 统一做 6 级路径探测并做词法规范化（诊断文本里不再出现
+`bin/../share/...`），`loadConfigs()` 返回 `ConfigLoadReport`：两个 XML 都必须解析成功且结构非空，
+`errors` 是致命问题、`warnings` 是可降级的单属性问题（例如 `fgColor` 写了非法十六进制，此时保留
+内置默认值而不是把 `-1` 写进 `GlobalStyles`）。
+
+启动失败时 `buildDiagnostic()` 生成完整文本：缺哪个文件、搜过哪些路径、具体解析错误，
+以及后果「编辑/查找/保存仍可用，语言菜单与语法高亮不可用」，同时写 stderr 并弹提示框。
+状态也可用 `StyleManager::lastReport()` 查询。重载配置会先清空旧状态，不会残留上一次的语言/样式。
+
+## 样式配置器
+
+「设置 > 语言样式配置器」按「语言 × 样式槽位」两维编辑：
+
+- 槽位来自 `stylers.model.xml` 里真实解析出的 `WordsStyle name` / `styleID`，不再只改槽位 0。
+- 字体系列、字体大小、粗体、斜体、前景色、背景色全部参与保存，并立即作用到所有打开的文档。
+- 覆盖值用 JSON 存在 `styleOverride/<lang>/<styleId>`；旧版 4 字段字符串键 `styleOverride/<lang>`
+  仍能被 `StyleOverride::deserialize()` 识别（等价 styleId 0），升级不会丢用户设置。
+- `applyPreferencesToEditor()` 里的 `setEditorFont()` 会重置全部 128 个样式槽位的字体，
+  所以 `applyPreferences()` 末尾必须重新 `reloadStyleOverrides()`，否则改一次首选项就把槽位字体冲掉了。
+- 全局项作用于编辑器整体字体与 `STYLE_DEFAULT`；语言级覆盖在解析顺序的后面叠加，优先级更高。
+
+## 快捷键映射器
+
+「设置 > 快捷键映射器」不再维护第二份硬编码清单：
+
+- `ShortcutManager::collectActions()` 遍历真实的 `QMenu` / `QAction` 树，分类由「哪个菜单的
+  `actions()` 包含它」反查（`QMenu::addAction()` 不改变 QAction 的 parent），并过滤工具栏里的镜像动作。
+  因此 v1.0.8 新增的「代码格式化」（Ctrl+Shift+F）会自动出现在表里。
+- 快捷键列用 `QKeySequenceEdit` 直接编辑；「应用」先做全量冲突检测，有冲突则不落盘并指出冲突的两个命令。
+- 覆盖存在 `shortcuts` 组，与默认键一致时不写；`applyTo()` 在 `MainWindow` 构造末尾执行，
+  首次调用时（尚未套用任何覆盖）记录默认键，所以「恢复默认」始终能回到代码里注册的键。
+- Scintilla 原生鼠标手势（Alt+拖动、Ctrl+点击等）单独列在「操作」组，只读并注明原因。
+
+## 折叠层次菜单
+
+「视图 > 折叠层次」现在同时提供「折叠层次 1~8」与「展开层次 1~8」子菜单，后者接到早已有实现
+却一直没有入口的 `EditorView::unfoldLevel()`。「折叠当前层次」/「展开当前层次」分别调用
+`foldCurrent()` / `expandCurrent()`，两者都先定位所属折叠头（`SCI_GETFOLDPARENT`）再按目标状态决定是否
+`SCI_TOGGLEFOLD`，因此重复点击不会来回反转；旧实现两个菜单项共用 `toggleCurrentFold()`。
+
+## 打开文件夹（左侧目录树）
+
+「文件 > 打开文件夹...」或工具栏的文件夹树按钮选择本地目录后，左侧出现可停靠的目录树；
+单击/双击树中的文件即在主区域标签页打开，目录节点只负责展开。
+「视图 > 文件夹树」可随时显示 / 隐藏，点停靠窗自己的关闭按钮也会同步菜单勾选状态。
+
+性能设计（这是该功能成立的前提）：
+
+- 数据完全交给 `QFileSystemModel`：`setRootPath()` 只建立当前根目录的监视，子目录内容在用户
+  展开时才 `fetchMore`。**没有任何递归遍历、全量索引或 O(N) 常驻内存**；打开一个含十万文件的
+  目录与打开空目录的成本相同 —— 都只读根一层。
+- 不自建线程、不自建 watcher：复用 `QFileSystemModel` 内建的异步填充与 inotify 监视。
+- `FolderTreeIconProvider` 用 `QStyle` 标准图标 + 按后缀的 `QHash` 缓存，避免默认
+  `QFileIconProvider` 对每个条目做 MIME / 主题图标查询。
+- `QTreeView` 只保留 Name 列（隐藏 Size/Type/Date Modified）、`setUniformRowHeights(true)`，
+  大目录滚动时跳过逐行高度计算。
+- 回归测试 `doesNotRecursivelyPrefetchDeepDirectories` 在深层目录放 1500 个文件，断言设根后
+  该目录 `rowCount() == 0` 且 `canFetchMore() == true`，把「零预扫描」变成可执行的契约。
+
+> 选型依据：评估过 `npp-explorer-plugin`，它是 Win32 专用，且附带全量递归 Quick Open 索引、
+> 单工作线程串行与非原子停止标志，不满足本项目的极致高性能目标，因此**未引入其任何代码**。
+> 逐条证据见 `docs/文件夹树技术评估.md`。

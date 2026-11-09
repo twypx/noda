@@ -24,6 +24,7 @@
 #include "dialogs/PreferencesDialog.h"
 #include "dialogs/ShortcutsDialog.h"
 #include "dialogs/StyleConfigDialog.h"
+#include "widgets/FolderTreePane.h"
 
 class QToolBar;
 class QTimer;
@@ -48,6 +49,15 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     void openFile(const QString& filePath);
 
+    // 设置左侧目录树的根并显示它；从 onOpenFolder() 与回归测试共用同一入口，
+    // 测试因此可以绕开 QFileDialog 的模态对话框。失败返回 false。
+    bool openFolderPath(const QString& path);
+
+signals:
+    // 保存/拷贝另存为失败：path 是目标路径，reason 是 EditorView::lastSaveError() 的具体原因。
+    // 发出信号的同时会弹提示框；信号便于回归测试观测，也便于后续接状态栏。
+    void saveFailed(const QString& path, const QString& reason);
+
 protected:
     void closeEvent(QCloseEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
@@ -59,6 +69,7 @@ private slots:
     // 文件菜单
     void onNewFile();
     void onOpenFile();
+    void onOpenFolder();
     void onOpenFolderInFileManager();
     void onOpenFolderInTerminal();
     void onReloadFile();
@@ -195,7 +206,11 @@ private slots:
     void onFileChangedOnDisk(const QString& path);
 
 private:
+    // 保存失败统一处理：发信号 + 带具体原因的提示，绝不假装成功。
+    void reportSaveFailure(const QString& path, EditorView* ed);
+
     void setupMenus();
+    void setupFolderTree();
     void setupTitleBar();
     void setupFileMenu();
     void setupEditMenu();
@@ -224,7 +239,8 @@ private:
     void savePreferences();
 
     // 将 QSettings 中持久化的“样式配置器”覆盖回灌到 StyleManager 并重绘所有编辑器。
-    void reloadStyleOverrides();
+    // Q_INVOKABLE 让回归测试能通过元对象验证持久化值真的作用到编辑器。
+    Q_INVOKABLE void reloadStyleOverrides();
 
     void loadRecentFiles();
     void addRecentFile(const QString& path);
@@ -244,6 +260,9 @@ private:
     void restartBackupTimer();
 
     TabManager* _tabManager{nullptr};
+    // 左侧目录树：既是 QDockWidget 也是数据/视图的持有者，初始隐藏。
+    FolderTreePane* _folderTree{nullptr};
+    QAction* _actFolderTree{nullptr};
     FindReplaceDialog* _findDialog{nullptr};
     QFileSystemWatcher* _fileWatcher{nullptr};
 

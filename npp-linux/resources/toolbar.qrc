@@ -8,6 +8,8 @@
     <file alias="file-plus_32.png">icons/toolbar/dark/file-plus_32.png</file>
     <file alias="folder-open_16.png">icons/toolbar/dark/folder-open_16.png</file>
     <file alias="folder-open_32.png">icons/toolbar/dark/folder-open_32.png</file>
+    <file alias="folder-tree_16.png">icons/toolbar/dark/folder-tree_16.png</file>
+    <file alias="folder-tree_32.png">icons/toolbar/dark/folder-tree_32.png</file>
     <file alias="indent-guide_16.png">icons/toolbar/dark/indent-guide_16.png</file>
     <file alias="indent-guide_32.png">icons/toolbar/dark/indent-guide_32.png</file>
     <file alias="list-x_16.png">icons/toolbar/dark/list-x_16.png</file>
@@ -50,6 +52,8 @@
     <file alias="file-plus_32.png">icons/toolbar/light/file-plus_32.png</file>
     <file alias="folder-open_16.png">icons/toolbar/light/folder-open_16.png</file>
     <file alias="folder-open_32.png">icons/toolbar/light/folder-open_32.png</file>
+    <file alias="folder-tree_16.png">icons/toolbar/light/folder-tree_16.png</file>
+    <file alias="folder-tree_32.png">icons/toolbar/light/folder-tree_32.png</file>
     <file alias="indent-guide_16.png">icons/toolbar/light/indent-guide_16.png</file>
     <file alias="indent-guide_32.png">icons/toolbar/light/indent-guide_32.png</file>
     <file alias="list-x_16.png">icons/toolbar/light/list-x_16.png</file>

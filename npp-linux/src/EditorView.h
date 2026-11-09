@@ -28,6 +28,12 @@ public:
     bool loadFromFile(const QString& filePath, const std::string& forcedEnc = std::string());
     bool saveToFile(const QString& filePath = QString());
 
+    // 只写一份按当前编码转码的副本，不改变本缓冲区的路径、savepoint 与修改标记。
+    bool saveCopyToFile(const QString& filePath);
+
+    // 最近一次写盘失败的具体原因（编码不支持 / 打不开 / 写盘失败 / 提交失败）；成功时为空。
+    QString lastSaveError() const { return _lastSaveError; }
+
     // 以指定编码重新解码载入当前文件（用于“设定编码”重新解释字节）。
     bool reloadWithEncoding(const std::string& enc);
 
@@ -148,6 +154,10 @@ public:
     void foldAll();
     void unfoldAll();
     void toggleCurrentFold();
+    // 「折叠/展开当前层次」是幂等动作，不再共用一个 toggle：
+    // 光标在折叠头或块内子行时，都先定位到所属折叠头再按目标状态决定是否切换。
+    void foldCurrent();
+    void expandCurrent();
     void foldLevel(int level);
     void unfoldLevel(int level);
     void setShowWhitespace(bool show);
@@ -202,11 +212,17 @@ private:
     // 无列选区的退化路径：逐行在光标所在列写入，行不够长时先补空格对齐。
     void writeColumnPayloadToDocEnd(const ColumnPayload& payload) const;
 
+    // 事务性写盘：BOM + 按编码真实转码 + commit。失败时 cancelWriting()，
+    // 原文件保持完好，原因写进 _lastSaveError。saveToFile / saveCopyToFile 共用。
+    bool writeEncodedFile(const QString& path, const std::string& utf8, const std::string& enc);
+
+    sptr_t currentFoldHeader() const;
     void initEditorDefaults();
     std::string getSelectedOrWordText() const;
     void replaceSelectedText(const std::string& replacement);
 
     std::shared_ptr<DocumentBuffer> _buffer;
+    QString _lastSaveError;
     bool _isDarkMode{false};
     bool _showLineNumbers{true};
     int _lastLineCount{-1};

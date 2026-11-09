@@ -113,8 +113,8 @@ bool decodeToUtf8Chunks(const char* in, std::size_t inLen, std::string_view encN
 
     iconv_t cd = iconv_open("UTF-8", iname.c_str());
     if (cd == reinterpret_cast<iconv_t>(-1)) {
-        // 目标编码不受支持：退化为透传，保证不丢内容（等同旧行为）。
-        sink(in, inLen);
+        // 硬失败且不产出任何字节：把原始字节当 UTF-8 交给 Scintilla 只会显示乱码，
+        // 调用方必须能区分「解码失败」与「解码成功但内容为空」。
         return false;
     }
 
@@ -161,7 +161,8 @@ bool encodeFromUtf8Chunks(const char* utf8, std::size_t len, std::string_view en
 
     iconv_t cd = iconv_open(oname.c_str(), "UTF-8");
     if (cd == reinterpret_cast<iconv_t>(-1)) {
-        if (len) sink(utf8, len); // 无法转换：至少保证内容可保存
+        // 绝不写 UTF-8 原始字节冒充目标编码：那会静默产生编码错误的文件。
+        // 上层收到 false 后必须放弃保存、保留修改标记并提示用户。
         return false;
     }
 

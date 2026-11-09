@@ -147,13 +147,16 @@ set(APP_SOURCES
     src/SessionManager.cpp
     src/utils/EncodingConverter.cpp
     src/widgets/TitleBar.cpp
+    src/widgets/FolderTreePane.cpp
     src/dialogs/FindReplaceDialog.cpp
     src/dialogs/GoToLineDialog.cpp
     src/dialogs/ColumnEditorDialog.cpp
     src/dialogs/DocSummaryDialog.cpp
     src/dialogs/PreferencesDialog.cpp
     src/dialogs/ShortcutsDialog.cpp
+    src/dialogs/ShortcutManager.cpp
     src/dialogs/StyleConfigDialog.cpp
+    src/dialogs/StyleOverride.cpp
     src/utils/ThemeManager.cpp
     src/utils/PrintHelper.cpp
     src/utils/ToolbarIcon.cpp
@@ -162,10 +165,27 @@ set(APP_SOURCES
     src/utils/StartupNotify.cpp
 )
 
+# 主程序与回归测试复用同一批应用对象文件：抽成 OBJECT 库，避免把 22 个 .cpp 编两遍。
+# main.cpp 不进库，测试可执行文件才能提供自己的入口。
+set(CORE_SOURCES ${APP_SOURCES})
+list(REMOVE_ITEM CORE_SOURCES src/main.cpp)
+add_library(npp_core OBJECT ${CORE_SOURCES})
+# npp_core 含 CodeFormatter.cpp / JsonFormatter.cpp，二者引用 AStyle 符号。
+# OBJECT 库本身不产生链接步骤，PUBLIC 只传递使用需求；真正链接 astyle 的仍是两个可执行目标。
+target_link_libraries(npp_core PUBLIC
+    ${QT_TARGETS}
+    scintilla_qt
+    lexilla
+    uchardet
+    pugixml
+    astyle
+)
+
 add_executable(notepad-plus-plus-linux
-    ${APP_SOURCES}
+    src/main.cpp
     resources/app.qrc
     resources/toolbar.qrc
+    $<TARGET_OBJECTS:npp_core>
 )
 
 # 自动将 langs.model.xml 和 stylers.model.xml 复制到构建输出目录，保证开箱即用
@@ -195,9 +215,12 @@ if(PkgConfig_FOUND)
     pkg_check_modules(XCB QUIET xcb)
 endif()
 if(XCB_FOUND)
+    # StartupNotify.cpp 现在编进 npp_core，条件编译宏必须打在真正编译它的目标上；
+    # 链接留给最终的可执行文件（OBJECT 库本身不产生链接步骤）。
+    target_compile_definitions(npp_core PRIVATE NPP_HAVE_XCB=1)
+    target_include_directories(npp_core PRIVATE ${XCB_INCLUDE_DIRS})
     target_compile_definitions(notepad-plus-plus-linux PRIVATE NPP_HAVE_XCB=1)
     target_link_libraries(notepad-plus-plus-linux PRIVATE ${XCB_LIBRARIES})
-    target_include_directories(notepad-plus-plus-linux PRIVATE ${XCB_INCLUDE_DIRS})
     message(STATUS "找到 libxcb（${XCB_VERSION}）：启用 X11 启动通知补漏")
 else()
     message(STATUS "未找到 libxcb（可装 libxcb1-dev）：跳过 X11 启动通知补漏")
@@ -281,4 +304,51 @@ set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/deb/postinst;${CMAKE_CURRENT_SOURCE_DIR}/resources/deb/postrm")
 
 include(CPack)
+
+# ---------------------------------------------------------------------------
+# 回归测试（Qt Test）
+#
+# 默认关闭，不干扰 build.sh / build_deb.sh / CPack。tests/run_tests.sh 会显式打开。
+# 测试进程用 offscreen 平台插件，并把 XDG_CONFIG_HOME 指到构建目录下的 test-config，
+# 避免 QSettings 写坏真实用户配置。
+# ---------------------------------------------------------------------------
+option(NPP_BUILD_TESTS "Build the Qt Test regression suite" OFF)
+if(NPP_BUILD_TESTS)
+    if(Qt6_FOUND)
+        find_package(Qt6 COMPONENTS Test REQUIRED)
+        set(NPP_TEST_TARGET Qt6::Test)
+    else()
+        find_package(Qt5 COMPONENTS Test REQUIRED)
+        set(NPP_TEST_TARGET Qt5::Test)
+    endif()
+
+    enable_testing()
+    file(GLOB NPP_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_*.cpp")
+    file(GLOB NPP_TEST_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.h")
+    add_executable(npp_tests
+        ${NPP_TEST_SOURCES}
+        ${NPP_TEST_HEADERS}
+        resources/toolbar.qrc
+        $<TARGET_OBJECTS:npp_core>
+    )
+    target_include_directories(npp_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    target_link_libraries(npp_tests PRIVATE
+        ${QT_TARGETS}
+        ${NPP_TEST_TARGET}
+        scintilla_qt
+        lexilla
+        uchardet
+        pugixml
+        astyle
+    )
+    if(XCB_FOUND)
+        target_link_libraries(npp_tests PRIVATE ${XCB_LIBRARIES})
+    endif()
+
+    add_test(NAME npp_tests COMMAND npp_tests)
+    set_tests_properties(npp_tests PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-config"
+        TIMEOUT 180)
+    message(STATUS "回归测试已启用：npp_tests（ctest --test-dir build --output-on-failure）")
+endif()
 

@@ -1,6 +1,7 @@
 # HANDOFF — Notepad++ Linux 移植开发交接
 
-> 交接于提交 `481409a`（master）。若当前 HEAD 已远超此提交，请以代码为准，本文可能已过期。
+> 原交接基于 `481409a`；当前基线为远程 `origin/master` = `dec7c62`（v1.0.8）。
+> 本轮「半成品与静默失败治理」的改动**尚未提交**；若 HEAD 已变动，请以代码与 `npp-linux/README.md` 为准。
 
 ## 0. 先确认你在哪
 
@@ -22,8 +23,9 @@ Notepad++ 的 Ubuntu / Linux 原生移植：纯 **C++20 + Qt6 Widgets**，编辑
 | 项 | 值 |
 |---|---|
 | 系统 | Ubuntu 24.04，Wayland + GNOME |
-| Qt | 6.4.2（`/usr/include/x86_64-linux-gnu/qt6`） |
-| 构建 | CMake ≥ 3.20 + AUTOMOC/AUTORCC + LTO（Release 全量约 5–8 分钟，LTO 串行 58 个 LTRANS） |
+| Qt | 6.4.2（`/usr/include/x86_64-linux-gnu/qt6`），需要 `Qt6::Concurrent` |
+| 构建 | CMake ≥ 3.20 + AUTOMOC/AUTORCC + LTO（Release 全量约 5–8 分钟，LTO 串行 60+ 个 LTRANS） |
+| 测试 | Qt6 Test + CTest，offscreen 平台插件，见 §10 |
 | 依赖包 | `build-essential cmake qt6-base-dev qt6-base-dev-tools`；打包另需 `dpkg-dev` |
 
 注意：Qt6 包名在本机带 **t64** 后缀（`libqt6widgets6t64` 等），这是 Ubuntu 24.04 的时间戳 ABI 转换。手写 deb 依赖会踩坑，所以本项目用 `dpkg-shlibdeps` 自动生成。
@@ -33,27 +35,38 @@ Notepad++ 的 Ubuntu / Linux 原生移植：纯 **C++20 + Qt6 Widgets**，编辑
 ```
 notepad-plus-plus-linux/
 ├── npp-linux/                 ← 移植本体（唯一需要改的地方）
-│   ├── CMakeLists.txt         ← 版本号、安装规则、CPack 配置全在这里
+│   ├── CMakeLists.txt         ← 版本 1.0.8、astyle、CPack、可选测试目标
 │   ├── src/
-│   │   ├── main.cpp           启动、资源搜索、图标、desktopFile 名
-│   │   ├── MainWindow.cpp/h   主窗口、菜单、工具栏、视图开关、偏好应用
-│   │   ├── EditorView.cpp     对 Scintilla 的封装（列选区、换行、显示符号）
+│   │   ├── main.cpp           启动、配置定位与失败诊断、图标、desktopFile 名
+│   │   ├── MainWindow.cpp/h   主窗口、菜单/工具栏、拖放、格式化、保存失败提示
+│   │   ├── EditorView.cpp     对 Scintilla 的封装（列选区、编码 IO、折叠、格式化写回）
 │   │   ├── TabManager.cpp     多标签页
 │   │   ├── DocumentBuffer.cpp 文档缓冲与磁盘状态
-│   │   ├── StyleManager.cpp   解析 langs/stylers XML
-│   │   ├── dialogs/           查找替换、列编辑器、首选项、快捷键、样式配置、跳转、文档摘要
-│   │   ├── utils/             ThemeManager(两套 QSS)、PrintHelper、ToolbarIcon、EncodingConverter
-│   │   └── widgets/TitleBar   无边框自绘标题栏（setMenuWidget 承载菜单栏）
+│   │   ├── StyleManager.cpp   解析 XML、路径探测、载入报告与诊断文本
+│   │   ├── SessionManager.cpp session.xml 与 backup/
+│   │   ├── dialogs/           查找替换、列编辑器、首选项、快捷键映射器、样式配置器等
+│   │   │   ├── StyleOverride.cpp/h     样式覆盖序列化与旧格式兼容（纯逻辑）
+│   │   │   └── ShortcutManager.cpp/h   QAction 收集、冲突检测、持久化（纯逻辑）
+│   │   ├── utils/             CodeFormatter/JsonFormatter、ThemeManager、EncodingConverter 等
+│   │   ├── widgets/FolderTreePane  左侧目录树停靠窗（QFileSystemModel + QTreeView，惰性）
+│   │   └── widgets/TitleBar   无边框自绘标题栏
+│   ├── third_party/astyle/    AStyle 格式化引擎（vendored，MIT，不要改）
+│   ├── tests/                 Qt Test 回归套件、test_main.cpp、run_tests.sh
 │   ├── resources/             app.qrc、toolbar.qrc、icons/、deb/{postinst,postrm}、*.desktop.in
 │   ├── tools/                 gen_icons.py、gen_toolbar_icons.py、release.sh
 │   ├── build.sh               日常构建 → build/
 │   ├── build_deb.sh           打 deb   → build-deb/
 │   └── README.md              ★ 功能与设计的权威文档，改动后请同步更新
+├── docs/                      开发计划2.md（TDD 执行记录）、文件夹树技术评估.md（选型证据）
 ├── scintilla/ lexilla/        vendored 上游引擎（不要改）
 └── PowerEditor/src/           vendored：uchardet、pugixml、langs/stylers.model.xml
 ```
 
 `CMakeLists.txt` 用 `NPP_ROOT = ..` 定位依赖，**这个层级不能动**，否则构建直接失败。
+
+`APP_SOURCES` 去掉 `main.cpp` 后编成 `OBJECT` 库 `npp_core`，主程序与 `npp_tests` 复用同一批对象文件。
+`npp_core` 含 `CodeFormatter.cpp` / `JsonFormatter.cpp`，二者引用 AStyle，所以两个可执行目标都要显式链接 `astyle`。
+`NPP_BUILD_TESTS` 默认 OFF；跑过 `tests/run_tests.sh` 后 CMakeCache 会保留 ON，此时 `cmake --build .` 也会构建测试目标，无害。
 
 ## 4. 常用命令
 
@@ -61,11 +74,12 @@ notepad-plus-plus-linux/
 cd /media/wtian/GithubProjects/notepad-plus-plus-linux/npp-linux
 
 ./build.sh                      # 日常构建 → build/notepad-plus-plus-linux
+./tests/run_tests.sh            # TDD：构建 npp_tests 并跑 ctest（见 §10）
 ./build_deb.sh                  # 打 deb → build-deb/*.deb
 
 # 发版（需要 GITEE_TOKEN，projects 权限）
-cd .. && ./npp-linux/tools/release.sh v1.0.0
-./npp-linux/tools/release.sh v1.0.0 --dry-run    # 只校验+构建，不推送不上传
+cd .. && ./npp-linux/tools/release.sh v1.0.9
+./npp-linux/tools/release.sh v1.0.9 --dry-run    # 只校验+构建，不推送不上传
 
 # 免 root 把图标/desktop 注册到当前用户（开发时临时用）
 ./install_desktop.sh
@@ -75,15 +89,26 @@ cd .. && ./npp-linux/tools/release.sh v1.0.0
 
 ## 5. 已实现功能（别重复造）
 
-多标签页（新建/打开/保存/另存为/未保存提示）、Scintilla 原生编辑与撤销、行号与折叠、当前行高亮、编码自动识别（uchardet）、换行符识别与显示、查找替换（正则/全字/大小写/全部替换）、外部文件修改监控（inotify）、**列选模式与列编辑器**、打印、工具栏（可持续选中态）、深浅两套主题、无边框自绘标题栏、透明抠图应用图标、deb 打包、Gitee Release 发版。
+多标签页（新建/打开/保存/另存为/未保存提示）、Scintilla 原生编辑与撤销、行号与折叠、当前行高亮、编码自动识别（uchardet）、换行符识别与显示、查找替换（正则/全字/大小写/全部替换）、外部文件修改监控（inotify）、**列选模式与列编辑器**、打印、工具栏（可持续选中态）、深浅两套主题、无边框自绘标题栏、透明抠图应用图标、会话记忆与未保存内容自动备份、deb 打包、Gitee Release 发版。
+
+v1.0.7 / v1.0.8 已提交：拖拽文件到窗口打开、透明抠图图标重做、**代码格式化**（AStyle + JSON，工作线程执行，含 vendored `third_party/astyle`）。
+
+本轮本地补齐（尚未提交）：**拷贝另存为按真实编码转码**；**保存失败事务化（`QSaveFile`）并显式提示**；**配置载入失败显式诊断**；**样式配置器支持多槽位与字体族/字号**；**快捷键映射器可编辑、自动与真实 QAction 一致、含冲突检测**；**视图菜单补齐「展开层次 1~8」与幂等的折叠/展开当前块**；Qt Test 回归套件。
+
+模块 F（打开文件夹，同样尚未提交）：文件菜单 / 工具栏「打开文件夹」→ 左侧 `QDockWidget` 目录树 → 点击文件复用 `openFile()` 在主区域打开；`QFileSystemModel` 惰性加载、零递归预扫描、图标按后缀缓存、深浅两套 QSS。**未引入 `npp-explorer-plugin` 任何代码**（评估见 `docs/文件夹树技术评估.md`）。
 
 细节与设计意图见 `npp-linux/README.md`，那里每节都写了「为什么这么做」。
 
 ## 6. 源码里值得先读的几处
 
-- `main.cpp` 的资源搜索列表：按 `applicationDirPath()` 依次探测 `./`、`../share/notepad-plus-plus-linux/`、`../PowerEditor/src/`，**不依赖编译期绝对路径**，所以 `/usr`、`/usr/local`、解包到临时目录都能跑。
+- `StyleManager::locateConfigFiles()`：按 `applicationDirPath()` 相对探测两个 XML 并做词法规范化，失败时 `buildDiagnostic()` 给出原因、路径清单与后果。
+- `EditorView::writeEncodedFile()`：`QSaveFile` + BOM + 分块转码 + `commit()`；任何失败 `cancelWriting()` 并把原因写进 `lastSaveError()`，`saveToFile()` 绝不 `SETSAVEPOINT`。
 - `MainWindow::addToggleTool()`：QAction 可勾选 + `toggled`↔`setChecked` 双向同步 + `triggered` 绑定。
 - `MainWindow::forEachEditor()`：视图开关必须作用于**每个**标签页，不能只改当前那个。
+- `MainWindow::reloadStyleOverrides()`：全局字体先于语言/槽位字体叠加，顺序反了会被 `setEditorFont()` 冲掉。
+- `StyleOverride::deserialize()` / `ShortcutManager::collectActions()`：把易错逻辑从 QWidget 抽出来，测试直接打纯逻辑。
+- `FolderTreePane::setRootPath()`：目录树惰性契约的唯一入口；不要在它周围加递归扫描或全量索引，
+  `TestFolderTree::doesNotRecursivelyPrefetchDeepDirectories` 会把任何预扫描变成红灯。
 - `EditorView::restoreColumnSelections()`：列选区改写后按角点重建。
 - `ThemeManager`：两套完整 QSS（dark/light），改样式必须两套都改。
 
@@ -96,39 +121,70 @@ cd .. && ./npp-linux/tools/release.sh v1.0.0
    - `QToolButton` 只要有样式规则，就必须写 `:checked`，否则开关按钮开着关着看起来一样。
 2. `QAction::setChecked()` **只发 `toggled`，不发 `triggered`**。渲染若挂在 `triggered` 上，代码里的 setChecked 不会触发它——「显示所有字符」这个合体开关就是这么断链的，必须自己把渲染做一遍。
 3. `QMainWindow::setMenuWidget()` 之后，`menuBar()->actions()` 返回空，找菜单要用 `findChildren<QMenu*>()`。
-4. `widget->grab()` 的渲染可能比逻辑状态**滞后一整批**，两张截图会内容互换。判断视觉差异要加 `QEventLoop + QTimer::singleShot(200, ...)` 等渲染稳定，并用像素统计而不是肉眼看缩略图。
+4. `widget->grab()` 的渲染可能比逻辑状态**滞后一整批**。判断视觉差异要加 `QEventLoop + QTimer::singleShot(200, ...)` 等渲染稳定，并用像素统计而不是肉眼看缩略图。
+5. `QMenu::addAction()` 不改变 QAction 的 parent；分类与反查要靠 `menu->actions()` 建映射。工具栏里还有一份同名镜像 QAction，`ShortcutManager` 必须过滤，否则同一快捷键被两个 QAction 抢注。
 
 **Scintilla**
 
-5. 列选区内部表示是**每行一个 selection**，且**索引 0 是主选区，不是最上面那一行**。改写后重建角点必须按 `selLpos`/`selRpos` 取极值，不能用 `front()/back()`。
-6. `SCI_GETCOLUMN`/`FINDCOLUMN` 的 column 按**字符**计，position 按**字节**计。混合 UTF-8/CJK 时全程在字节层拼接才不错位。
+6. 列选区内部表示是**每行一个 selection**，且**索引 0 是主选区，不是最上面那一行**。改写后重建角点必须按 `selLpos`/`selRpos` 取极值，不能用 `front()/back()`。
+7. `SCI_GETCOLUMN`/`FINDCOLUMN` 的 column 按**字符**计，position 按**字节**计。混合 UTF-8/CJK 时全程在字节层拼接才不错位。
+8. `setEditorFont()` 会重置全部 128 个样式槽位的字体；样式配置器的槽位字体必须在它**之后**重新叠加。
+
+**编码 / 保存**
+
+9. `iconv_open` 失败时绝不能把内部 UTF-8 原始字节当目标编码写出去。`EncodingConverter` 现在硬失败且不产出字节；上层用 `QSaveFile` 保证原文件不被截断。
 
 **探针与验证**
 
-7. offscreen 探针（`QT_QPA_PLATFORM=offscreen`）直接实例化真实窗口类来验证 UI 逻辑，非常有效。但要注意：
-   - 复用 CMake 目标文件链接探针：`find . -name "*.o" | grep notepad-plus-plus-linux.dir`；
-   - 管道下必须 `stdbuf -o0`，否则看不到输出；
-   - **调用真实槽函数会触发 `savePreferences()`，写坏 `~/.config/Notepad++/Notepad++.conf`**，跑完要检查；
-   - 用 `QLatin1String(中文)` 与 QString 比较**恒为 false**，会让 helper 返回 nullptr 再段错误。
-8. `DeleteFile` 工具对 ELF 可执行文件无效（报成功但没删），删二进制用精确路径的 `rm -f`。
+10. offscreen 探针（`QT_QPA_PLATFORM=offscreen`）直接实例化真实窗口类来验证 UI 逻辑，非常有效。但要注意：
+    - 复用 CMake 目标文件链接探针：`find . -name "*.o" | grep notepad-plus-plus-linux.dir`；
+    - 管道下必须 `stdbuf -o0`，否则看不到输出；
+    - **调用真实槽函数会触发 `savePreferences()`，写坏 `~/.config/Notepad++/Notepad++.conf`**；测试进程必须隔离 `XDG_CONFIG_HOME`；
+    - 用 `QLatin1String(中文)` 与 QString 比较**恒为 false**，会让 helper 返回 nullptr 再段错误。
+11. `DeleteFile` 工具对 ELF 可执行文件无效（报成功但没删），删二进制用精确路径的 `rm -f`。
 
 **打包 / CPack**
 
-9. `CPACK_RESOURCE_FILE_LICENSE` 在 DEB 生成器下**不会**落盘 `/usr/share/doc/<pkg>/copyright`，必须显式 `install(FILES ... RENAME copyright)`。
-10. CPack **不生成** debhelper 那样的 dpkg 触发器，装完图标缓存不刷新——靠 `postinst`/`postrm` 手动跑 `gtk-update-icon-cache` 与 `update-desktop-database`。
-11. `.desktop` 的 `Exec` 在 configure 阶段就被固化成绝对路径，CPack 又复用 CMakeCache。**必须** `-DCMAKE_INSTALL_PREFIX=/usr`，否则打出 `Exec=/usr/local/bin/...` 而文件在 `/usr/bin`，装完点图标没反应。`build_deb.sh` 每次清空构建目录来规避。
+12. `CPACK_RESOURCE_FILE_LICENSE` 在 DEB 生成器下**不会**落盘 `/usr/share/doc/<pkg>/copyright`，必须显式 `install(FILES ... RENAME copyright)`。
+13. CPack **不生成** debhelper 那样的 dpkg 触发器，装完图标缓存不刷新——靠 `postinst`/`postrm` 手动跑 `gtk-update-icon-cache` 与 `update-desktop-database`。
+14. `.desktop` 的 `Exec` 在 configure 阶段就被固化成绝对路径，CPack 又复用 CMakeCache。**必须** `-DCMAKE_INSTALL_PREFIX=/usr`，否则打出 `Exec=/usr/local/bin/...` 而文件在 `/usr/bin`，装完点图标没反应。`build_deb.sh` 每次清空构建目录来规避。
+
+**目录树 / 停靠窗**
+
+- `QFileSystemModel::setRootPath()` 只填充根一层，靠 `canFetchMore/fetchMore` 惰性展开；任何
+  `QDirIterator` 递归都会让 `TestFolderTree` 的惰性契约变红。
+- `QDockWidget::visibilityChanged` 与视图菜单 `QAction::toggled` 双向同步必须用 `QSignalBlocker`
+  阻断回环；`QAction::setChecked()` 只发 `toggled`，不发 `triggered`（见第 2 条）。
+- `QFileSystemModel` 不接管 `iconProvider` 的所有权：`FolderTreePane` 析构顺序必须是
+  `view->setModel(nullptr)` → 删 model → 删 provider，否则留下悬空指针。
 
 ## 8. 未决事项
 
 | 事项 | 说明 |
 |---|---|
-| **HiDPI 图标** | QSS 的 `image:` 走固定 16px，用不了 `QIcon` 的 DPR 机制，200% 缩放下关闭按钮会偏小。方案是在 `gen_toolbar_icons.py` 补 `x_16@2x.png` 别名（指向 32px 资源），Qt 会按 DPR 自动命中。**未实施，等用户确认其屏幕是否真受影响。** |
 | **仓库可见性** | Gitee 仓库当前是**私有**，Release 附件对外不可见。若要公开下载需改仓库可见性。 |
-| **首次 build/** | 新目录只有 `build-deb/`。要日常迭代先在 `npp-linux/` 跑一次 `./build.sh`（全量 5–8 分钟）。 |
+| **能力缺口** | 插件系统、宏、函数列表、分栏/双视图、UDL、远程文件、「仅打印选区」、打印语法高亮颜色仍未实现（设计上明确排除，见 README）。 |
 | **无 AGENTS.md** | 本仓库刻意没放。若想约束提交信息格式等，需要单独加一份。 |
+
+HiDPI 标签关闭按钮已由 `ThemeManager::closeButtonImage()` 按 DPR 选 `x_16/x_32` 实现，旧版交接文档把它列为「未实施」已失效，此处移除。
 
 ## 9. 与上游的关系
 
-`scintilla/`、`lexilla/`、`PowerEditor/src/{uchardet,pugixml}` 都是上游 vendored 副本，**不要就地修改**（上游 `AGENTS.md` 也要求不改这两个引擎）。要升级引擎版本，从只读参考目录或上游仓库取新版本覆盖。
+`scintilla/`、`lexilla/`、`PowerEditor/src/{uchardet,pugixml}`、`npp-linux/third_party/astyle/` 都是上游 vendored 副本，**不要就地修改**。要升级引擎版本，从只读参考目录或上游仓库取新版本覆盖。
 
-许可：`npp-linux/` 沿用 Notepad++ 的 GPL-3.0；Scintilla/Lexilla 为 Neil Hodgson 宽松许可；uchardet 为 MPL 1.1/GPL 2.0/LGPL 2.1；pugixml 为 MIT。详见根目录 `LICENSE` 与各子目录的许可文件。
+许可：`npp-linux/` 沿用 Notepad++ 的 GPL-3.0；Scintilla/Lexilla 为 Neil Hodgson 宽松许可；uchardet 为 MPL 1.1/GPL 2.0/LGPL 2.1；pugixml 为 MIT；AStyle 为 MIT。详见根目录 `LICENSE` 与各子目录的许可文件。
+
+## 10. 回归测试（TDD）
+
+```bash
+cd npp-linux
+./tests/run_tests.sh
+```
+
+- 框架：Qt6 Test，单可执行文件 `npp_tests`，`tests/test_main.cpp` 用 `QTest::qExec` 依次跑各测试类；`enable_testing()` + CTest 注册。
+- 隔离：`QT_QPA_PLATFORM=offscreen`；`XDG_CONFIG_HOME` 指向 `build/test-config` 并在每次运行前清空，**测试不会碰真实用户配置**。
+- 只构建 `npp_tests` 目标，日常迭代不触发主程序 LTO 链接；模块收尾时再 `cmake --build build --target notepad-plus-plus-linux` 全量验证。
+- `TestV108Baseline` 专门锁住 v1.0.7 / v1.0.8 的格式化与拖放能力，任何改造都不能让它变红。
+- 覆盖：编码转换与失败语义、保存/拷贝另存为事务性、保存失败提示、配置定位与载入报告、样式覆盖序列化与旧格式兼容、样式配置器 UI、快捷键收集/冲突/持久化、折叠幂等与菜单接线、目录树惰性加载契约（1500 文件深层零预扫描）、文件激活与主窗口集成、主题与工具栏图标资源。
+- 当前 10 个测试类共 73 项；`TestV108Baseline` 始终锁住 v1.0.7 / v1.0.8 的格式化与拖放能力。
+- 开发流程：先写测试跑出红灯，再写实现跑到绿灯；绿灯前不进入下一模块。执行记录见 `docs/开发计划2.md`。

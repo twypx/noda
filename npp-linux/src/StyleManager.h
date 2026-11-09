@@ -1,14 +1,18 @@
 #pragma once
+#include <cstddef>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 struct LexerStyle {
     int styleID{0};
+    std::string name;       // stylers.model.xml 中 WordsStyle 的 name（供配置器列槽位）
     int fgColor{-1};
     int bgColor{-1};
     bool bold{false};
     bool italic{false};
+    std::string fontName;   // 空 = 沿用全局编辑器字体
+    int fontSize{0};        // 0  = 沿用全局编辑器字号
 };
 
 struct LanguageDefinition {
@@ -35,6 +39,23 @@ struct GlobalStyles {
     int foldMarginBg{0xE9E9E9};
 };
 
+// 两个 model.xml 的探测结果；searched 记录全部候选路径供失败诊断逐条列出。
+struct ConfigPaths {
+    std::string langs;
+    std::string stylers;
+    std::vector<std::string> searched;
+    bool complete() const { return !langs.empty() && !stylers.empty(); }
+};
+
+// errors 是致命错误（高亮不可用）；warnings 是可降级的单属性问题。
+struct ConfigLoadReport {
+    bool ok{false};
+    std::vector<std::string> errors;
+    std::vector<std::string> warnings;
+    std::size_t languageCount{0};
+    std::size_t styleCount{0};
+};
+
 class StyleManager {
 public:
     static StyleManager& instance() {
@@ -42,7 +63,16 @@ public:
         return s_instance;
     }
 
-    bool loadConfigs(const std::string& langsPath, const std::string& stylersPath);
+    // 按 applicationDirPath() 相对推导两个 XML，不依赖编译期绝对路径。
+    static ConfigPaths locateConfigFiles(const std::string& appDir);
+
+    // 两个 XML 都必须解析成功且结构非空才算成功；重载会清空上一次的状态。
+    ConfigLoadReport loadConfigs(const std::string& langsPath, const std::string& stylersPath);
+    const ConfigLoadReport& lastReport() const { return _lastReport; }
+
+    // 面向用户的诊断文本：缺哪个文件、找过哪些路径、有什么后果。
+    static std::string buildDiagnostic(const ConfigPaths& paths, const ConfigLoadReport& report);
+
     std::string detectLanguageByExt(const std::string& ext) const;
     std::string getLexerName(const std::string& langName) const;
     const std::vector<LexerStyle>* getStyles(const std::string& langName) const;
@@ -55,6 +85,10 @@ public:
     // 覆盖/新增指定 styleID 的前景、背景、粗体、斜体（颜色为 BGR，-1 表示不改动）。
     void overrideStyle(const std::string& langName, int styleID, int fg, int bg, bool bold, bool italic);
 
+    // 覆盖指定 styleID 的字体族/字号（空串 / 0 表示该字段不覆盖）。
+    void overrideFont(const std::string& langName, int styleID,
+                      const std::string& fontName, int fontSize);
+
     // 已加载的全部语言名（供样式配置器列表使用）。
     std::vector<std::string> languageNames() const;
 
@@ -65,4 +99,5 @@ private:
     std::unordered_map<std::string, std::string> _extToLang;        // ext -> langName
     std::unordered_map<std::string, std::vector<LexerStyle>> _styles; // langName -> styles
     GlobalStyles _globalStyles;
+    ConfigLoadReport _lastReport;
 };

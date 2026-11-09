@@ -4,6 +4,8 @@
 #include "utils/StartupNotify.h"
 #include <QDir>
 #include <QIcon>
+#include <QMessageBox>
+#include <QString>
 #include <iostream>
 
 int main(int argc, char* argv[]) {
@@ -32,46 +34,24 @@ int main(int argc, char* argv[]) {
     // 否则 GNOME 会把窗口归到“匿名应用”而显示通用图标。
     app.setDesktopFileName(QStringLiteral("notepad-plus-plus-linux"));
 
-    // 载入 Notepad++ 语法与高亮样式配置 (多级智能探测)
-    // 第二项是安装后的位置：可执行文件在 <prefix>/bin，XML 在 <prefix>/share/notepad-plus-plus-linux。
-    // 用 ../share 相对推导而不是编译期绝对路径，这样 /usr、/usr/local 以及把 deb 解包到
-    // 临时目录后直接运行都能命中。
-    QString appDir = QApplication::applicationDirPath();
-    QStringList searchPaths = {
-        appDir + "/langs.model.xml",
-        appDir + "/../share/notepad-plus-plus-linux/langs.model.xml",
-        appDir + "/../../PowerEditor/src/langs.model.xml",
-        appDir + "/../PowerEditor/src/langs.model.xml",
-        "./PowerEditor/src/langs.model.xml",
-        "./langs.model.xml"
-    };
-
-    QString langsPath;
-    for (const auto& path : searchPaths) {
-        if (QFile::exists(path)) {
-            langsPath = path;
-            break;
-        }
+    // 载入语法与高亮样式配置。路径探测统一交给 StyleManager，结果带完整诊断信息。
+    // 缺文件 / 解析失败必须显式告知：旧实现跳过 loadConfigs 后静默启动，
+    // 表现是「语言菜单和高亮全没了」却没有任何解释。
+    const ConfigPaths configPaths = StyleManager::locateConfigFiles(
+        QApplication::applicationDirPath().toStdString());
+    ConfigLoadReport report;
+    if (configPaths.complete()) {
+        report = StyleManager::instance().loadConfigs(configPaths.langs, configPaths.stylers);
+    } else {
+        report.ok = false;
+        if (configPaths.langs.empty()) report.errors.push_back("langs.model.xml 未找到");
+        if (configPaths.stylers.empty()) report.errors.push_back("stylers.model.xml 未找到");
     }
-
-    QString stylersPath;
-    QStringList stylerSearchPaths = {
-        appDir + "/stylers.model.xml",
-        appDir + "/../share/notepad-plus-plus-linux/stylers.model.xml",
-        appDir + "/../../PowerEditor/src/stylers.model.xml",
-        appDir + "/../PowerEditor/src/stylers.model.xml",
-        "./PowerEditor/src/stylers.model.xml",
-        "./stylers.model.xml"
-    };
-    for (const auto& path : stylerSearchPaths) {
-        if (QFile::exists(path)) {
-            stylersPath = path;
-            break;
-        }
-    }
-
-    if (!langsPath.isEmpty() && !stylersPath.isEmpty()) {
-        StyleManager::instance().loadConfigs(langsPath.toStdString(), stylersPath.toStdString());
+    if (!report.ok) {
+        const QString detail = QString::fromStdString(
+            StyleManager::buildDiagnostic(configPaths, report));
+        std::cerr << "[Notepad++ Linux] " << detail.toStdString() << std::endl;
+        QMessageBox::critical(nullptr, QStringLiteral("语法配置载入失败"), detail);
     }
 
     MainWindow window;

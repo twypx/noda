@@ -32,9 +32,12 @@
 #include <QPrinter>
 #include <QPrintDialog>
 #include <QTimer>
+#include <QSignalBlocker>
 #include <QtConcurrent/QtConcurrentRun>
 #include <vector>
 #include "utils/CodeFormatter.h"
+#include "dialogs/StyleOverride.h"
+#include "dialogs/ShortcutManager.h"
 
 namespace {
 // 写盘期间临时解除对该路径的 inotify 监视，析构后恢复，避免自身保存触发“外部修改”假警报。
@@ -132,6 +135,7 @@ MainWindow::MainWindow(QWidget* parent)
     setupTitleBar();
     setupToolBar();
     setupStatusBar();
+    setupFolderTree();
     loadRecentFiles();
 
     connect(_tabManager, &TabManager::activeEditorChanged, this, &MainWindow::onActiveEditorChanged);
@@ -177,6 +181,9 @@ MainWindow::MainWindow(QWidget* parent)
     if (_prefs.darkMode) {
         onToggleDarkMode(true);
     }
+
+    // 所有菜单/工具栏 QAction 已建好，此时套用用户自定义快捷键。
+    ShortcutManager::instance().applyTo(this);
 }
 
 void MainWindow::setupMenus() {
@@ -219,6 +226,7 @@ void MainWindow::setupFileMenu() {
 
     menu->addAction("新建(&N)", QKeySequence::New, this, &MainWindow::onNewFile);
     menu->addAction("打开(&O)...", QKeySequence::Open, this, &MainWindow::onOpenFile);
+    menu->addAction("打开文件夹(&D)...", this, &MainWindow::onOpenFolder);
 
     auto* openFolderMenu = menu->addMenu("打开所在文件夹(&F)");
     openFolderMenu->addAction("在文件管理器中打开", this, &MainWindow::onOpenFolderInFileManager);
@@ -420,6 +428,10 @@ void MainWindow::setupViewMenu() {
     _actAlwaysOnTop = menu->addAction("总在最前", this, &MainWindow::onToggleAlwaysOnTop);
     _actAlwaysOnTop->setCheckable(true);
 
+    // 目录树停靠窗被用户关闭后，仍能从这里重新打开。
+    _actFolderTree = menu->addAction("文件夹树(&T)");
+    _actFolderTree->setCheckable(true);
+
     _actWrap = menu->addAction("自动换行", this, &MainWindow::onToggleWordWrap);
     _actWrap->setCheckable(true);
 
@@ -460,6 +472,12 @@ void MainWindow::setupViewMenu() {
     foldMenu->addSeparator();
     for (int lvl = 1; lvl <= 8; ++lvl) {
         foldMenu->addAction(QString("折叠层次 %1").arg(lvl), [this, lvl]() { onFoldLevel(lvl); });
+    }
+    foldMenu->addSeparator();
+    // unfoldLevel() 早已实现，此前一直没有菜单入口；与「折叠层次 N」成对提供。
+    auto* unfoldMenu = foldMenu->addMenu("展开层次(&U)");
+    for (int lvl = 1; lvl <= 8; ++lvl) {
+        unfoldMenu->addAction(QString("展开层次 %1").arg(lvl), [this, lvl]() { onUnfoldLevel(lvl); });
     }
 
     auto* tabNavMenu = menu->addMenu("标签页");
@@ -572,7 +590,7 @@ void MainWindow::setupSettingsMenu() {
     auto* menu = menuBar()->addMenu("设置(&T)");
     menu->addAction("首选项(&P)...", this, &MainWindow::onPreferences);
     menu->addAction("语言样式配置器(&S)...", this, &MainWindow::onStyleConfigurator);
-    menu->addAction("快捷键一览(&K)...", this, &MainWindow::onShortcutsMapper);
+    menu->addAction("快捷键映射器(&K)...", this, &MainWindow::onShortcutsMapper);
 }
 
 void MainWindow::setupToolBar() {
@@ -583,6 +601,7 @@ void MainWindow::setupToolBar() {
     const QVector<ToolEntry> entries = {
         {"file-plus",       "新建",     &MainWindow::onNewFile,        QKeySequence::New},
         {"folder-open",     "打开",     &MainWindow::onOpenFile,       QKeySequence::Open},
+        {"folder-tree",     "打开文件夹", &MainWindow::onOpenFolder,     QKeySequence()},
         {"save",            "保存",     &MainWindow::onSaveFile,       QKeySequence::Save},
         {"save-all",        "全部保存",  &MainWindow::onSaveAllFiles,   QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S)},
         {"x",               "关闭",     &MainWindow::onCloseFile,      QKeySequence::Close},
@@ -770,6 +789,43 @@ void MainWindow::openFile(const QString& filePath) {
     }
 }
 
+void MainWindow::setupFolderTree() {
+    _folderTree = new FolderTreePane(this);
+    _folderTree->setObjectName(QStringLiteral("folderTreeDock"));
+    _folderTree->hide();   // 未选择目录时不占左侧空间
+    addDockWidget(Qt::LeftDockWidgetArea, _folderTree);
+
+    connect(_folderTree, &FolderTreePane::fileActivated, this,
+            [this](const QString& path) { openFile(path); });
+
+    if (_actFolderTree) {
+        connect(_actFolderTree, &QAction::toggled, this, [this](bool visible) {
+            if (_folderTree) _folderTree->setVisible(visible);
+        });
+    }
+    // 用户点停靠窗自己的关闭按钮时，把菜单勾选状态同步回来；阻断信号避免回环。
+    connect(_folderTree, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+        if (!_actFolderTree) return;
+        QSignalBlocker block(_actFolderTree);
+        _actFolderTree->setChecked(visible);
+    });
+}
+
+void MainWindow::onOpenFolder() {
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, QStringLiteral("打开文件夹"), QDir::homePath(),
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+    if (!dir.isEmpty()) openFolderPath(dir);
+}
+
+bool MainWindow::openFolderPath(const QString& path) {
+    if (!_folderTree || !_folderTree->setRootPath(path)) return false;
+    _folderTree->show();
+    if (_actFolderTree && !_actFolderTree->isChecked())
+        _actFolderTree->setChecked(true);
+    return true;
+}
+
 void MainWindow::onOpenFolderInFileManager() {
     auto* ed = _tabManager->currentEditor();
     if (!ed) return;
@@ -806,6 +862,15 @@ void MainWindow::onReloadFile() {
     updateStatusBar(ed);
 }
 
+void MainWindow::reportSaveFailure(const QString& path, EditorView* ed) {
+    const QString reason = ed ? ed->lastSaveError() : QStringLiteral("未知错误");
+    emit saveFailed(path, reason);
+    QMessageBox::warning(this, QStringLiteral("保存失败"),
+        QStringLiteral("未能写入 %1。\n\n原因：%2\n\n"
+                       "磁盘文件未被改动，文档内容仍在编辑器中；"
+                       "可在「编码」菜单换用其他编码后重试。").arg(path, reason));
+}
+
 void MainWindow::onSaveFile() {
     auto* ed = _tabManager->currentEditor();
     if (!ed) return;
@@ -821,72 +886,86 @@ void MainWindow::onSaveFile() {
         ok = ed->saveToFile();
     }
     _savingPaths.remove(path);
-    if (ok) {
-        _tabManager->updateTabTitle(_tabManager->currentIndex());
-        addRecentFile(path);
+    if (!ok) {
+        reportSaveFailure(path, ed);
+        return;
     }
+    _tabManager->updateTabTitle(_tabManager->currentIndex());
+    addRecentFile(path);
 }
 
 void MainWindow::onSaveAsFile() {
     auto* ed = _tabManager->currentEditor();
     if (!ed) return;
-    QString path = QFileDialog::getSaveFileName(this, "另存为", QString(), "所有文件 (*.*)");
-    if (!path.isEmpty()) {
-        const QString oldPath = QString::fromStdString(ed->buffer()->getFilePath());
-        _savingPaths.insert(path);
-        if (!oldPath.isEmpty()) _savingPaths.insert(oldPath);
-        bool ok = false;
-        {
-            WatchGuard gNew(_fileWatcher, path);
-            WatchGuard gOld(_fileWatcher, oldPath);
-            ok = ed->saveToFile(path);
-        }
-        _savingPaths.remove(path);
-        if (!oldPath.isEmpty()) _savingPaths.remove(oldPath);
-        if (ok) {
-            _tabManager->updateTabTitle(_tabManager->currentIndex());
-            if (!_fileWatcher->files().contains(path)) _fileWatcher->addPath(path);
-            addRecentFile(path);
-            updateStatusBar(ed);
-        }
+    const QString path = QFileDialog::getSaveFileName(this, "另存为", QString(), "所有文件 (*.*)");
+    if (path.isEmpty()) return;
+
+    const QString oldPath = QString::fromStdString(ed->buffer()->getFilePath());
+    _savingPaths.insert(path);
+    if (!oldPath.isEmpty()) _savingPaths.insert(oldPath);
+    bool ok = false;
+    {
+        WatchGuard gNew(_fileWatcher, path);
+        WatchGuard gOld(_fileWatcher, oldPath);
+        ok = ed->saveToFile(path);
     }
+    _savingPaths.remove(path);
+    if (!oldPath.isEmpty()) _savingPaths.remove(oldPath);
+    if (!ok) {
+        reportSaveFailure(path, ed);
+        return;
+    }
+    _tabManager->updateTabTitle(_tabManager->currentIndex());
+    if (!_fileWatcher->files().contains(path)) _fileWatcher->addPath(path);
+    addRecentFile(path);
+    updateStatusBar(ed);
 }
 
 void MainWindow::onSaveCopyAs() {
     auto* ed = _tabManager->currentEditor();
     if (!ed) return;
-    QString path = QFileDialog::getSaveFileName(this, "拷贝另存为", QString(), "所有文件 (*.*)");
-    if (!path.isEmpty()) {
-        QFile file(path);
-        if (file.open(QIODevice::WriteOnly)) {
-            auto len = ed->send(SCI_GETLENGTH);
-            if (len > 0) {
-                QByteArray buf(len + 1, '\0');
-                ed->send(SCI_GETTEXT, len + 1, reinterpret_cast<sptr_t>(buf.data()));
-                file.write(buf.constData(), len);
-            }
-        }
+    const QString path = QFileDialog::getSaveFileName(this, "拷贝另存为", QString(), "所有文件 (*.*)");
+    if (path.isEmpty()) return;
+
+    // 旧实现直接倾倒内存 UTF-8 字节，非 UTF-8 文档会得到编码错误的副本，
+    // 而且连 QFile 打不开也完全没有提示。
+    if (!ed->saveCopyToFile(path)) {
+        reportSaveFailure(path, ed);
     }
 }
 
 void MainWindow::onSaveAllFiles() {
+    QStringList failures;
     for (int i = 0; i < _tabManager->count(); ++i) {
         auto* ed = _tabManager->editorAt(i);
-        if (ed && ed->buffer()->isModified()) {
-            if (ed->buffer()->getFilePath().empty()) {
-                _tabManager->setCurrentIndex(i);
-                onSaveAsFile();
-            } else {
-                const QString path = QString::fromStdString(ed->buffer()->getFilePath());
-                _savingPaths.insert(path);
-                {
-                    WatchGuard guard(_fileWatcher, path);
-                    ed->saveToFile();
-                }
-                _savingPaths.remove(path);
-                _tabManager->updateTabTitle(i);
-            }
+        if (!ed || !ed->buffer()->isModified()) continue;
+        if (ed->buffer()->getFilePath().empty()) {
+            _tabManager->setCurrentIndex(i);
+            onSaveAsFile();   // 该路径自身已负责失败提示
+            continue;
         }
+        const QString path = QString::fromStdString(ed->buffer()->getFilePath());
+        _savingPaths.insert(path);
+        bool ok = false;
+        {
+            WatchGuard guard(_fileWatcher, path);
+            ok = ed->saveToFile();
+        }
+        _savingPaths.remove(path);
+        if (!ok) {
+            // 批量保存不逐个弹框：先发信号并收集，循环结束后汇总一次。
+            const QString reason = ed->lastSaveError();
+            emit saveFailed(path, reason);
+            failures << QStringLiteral("%1：%2").arg(path, reason);
+            continue;
+        }
+        _tabManager->updateTabTitle(i);
+    }
+    if (!failures.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("部分文件保存失败"),
+            QStringLiteral("以下文档未保存成功（磁盘文件未被改动）：\n\n%1\n\n"
+                           "可在「编码」菜单换用其他编码后重试。")
+                .arg(failures.join(QLatin1Char('\n'))));
     }
 }
 
@@ -1365,8 +1444,8 @@ void MainWindow::onZoomIn() { if (auto* ed = _tabManager->currentEditor()) ed->z
 void MainWindow::onZoomOut() { if (auto* ed = _tabManager->currentEditor()) ed->zoomOut(); }
 void MainWindow::onZoomReset() { if (auto* ed = _tabManager->currentEditor()) ed->zoomReset(); }
 
-void MainWindow::onFoldCurrent() { if (auto* ed = _tabManager->currentEditor()) ed->toggleCurrentFold(); }
-void MainWindow::onUnfoldCurrent() { if (auto* ed = _tabManager->currentEditor()) ed->toggleCurrentFold(); }
+void MainWindow::onFoldCurrent() { if (auto* ed = _tabManager->currentEditor()) ed->foldCurrent(); }
+void MainWindow::onUnfoldCurrent() { if (auto* ed = _tabManager->currentEditor()) ed->expandCurrent(); }
 void MainWindow::onFoldAll() { if (auto* ed = _tabManager->currentEditor()) ed->foldAll(); }
 void MainWindow::onUnfoldAll() { if (auto* ed = _tabManager->currentEditor()) ed->unfoldAll(); }
 void MainWindow::onFoldLevel(int lvl) { if (auto* ed = _tabManager->currentEditor()) ed->foldLevel(lvl); }
@@ -1517,38 +1596,39 @@ void MainWindow::onStyleConfigurator() {
 }
 
 void MainWindow::reloadStyleOverrides() {
-    struct Override { QString id; int fg; int bg; bool bold; bool italic; };
-    QList<Override> overrides;
-    QSettings s;
-    s.beginGroup("styleOverride");
-    for (const QString& id : s.childKeys()) {
-        const QStringList parts = s.value(id).toString().split(';');
-        if (parts.size() < 2) continue;
-        Override o;
-        o.id = id;
-        o.fg = parts[0].toInt();
-        o.bg = parts[1].toInt();
-        o.bold = parts.size() >= 3 && parts[2].toInt() != 0;
-        o.italic = parts.size() >= 4 && parts[3].toInt() != 0;
-        overrides.append(o);
-    }
-    s.endGroup();
+    const QList<StyleOverride> overrides = StyleOverride::loadAll();
 
-    // 语言级覆盖写入 StyleManager（槽位 0 = 该语言的默认文本样式）。
+    int globalFg = -1;
+    int globalBg = -1;
+    QString globalFontName;
+    int globalFontSize = 0;
+
     for (const auto& o : overrides) {
-        if (o.id == "global") continue;
-        StyleManager::instance().overrideStyle(o.id.toStdString(), 0, o.fg, o.bg, o.bold, o.italic);
+        if (o.langId == QLatin1String("global")) {
+            globalFg = o.fg;
+            globalBg = o.bg;
+            globalFontName = o.fontName;
+            globalFontSize = o.fontSize;
+            continue;
+        }
+        const std::string lang = o.langId.toStdString();
+        StyleManager::instance().overrideStyle(lang, o.styleId, o.fg, o.bg,
+                                               o.bold, o.italic);
+        if (!o.fontName.isEmpty() || o.fontSize > 0) {
+            StyleManager::instance().overrideFont(lang, o.styleId,
+                                                  o.fontName.toStdString(), o.fontSize);
+        }
     }
 
-    int globalFg = -1, globalBg = -1;
-    for (const auto& o : overrides) {
-        if (o.id == "global") { globalFg = o.fg; globalBg = o.bg; }
-    }
-
-    // 重新应用高亮（会重置样式），随后叠加全局默认前景/背景覆盖。
     for (int i = 0; i < _tabManager->count(); ++i) {
         auto* ed = _tabManager->editorAt(i);
         if (!ed) continue;
+        // 先落实全局字体（setEditorFont 会重置 128 个槽位的字体），再叠加语言/槽位级
+        // 覆盖；顺序反了语言级字体就会被冲掉。
+        if (!globalFontName.isEmpty() || globalFontSize > 0) {
+            ed->setEditorFont(globalFontName.isEmpty() ? ed->getEditorFontName() : globalFontName,
+                              globalFontSize > 0 ? globalFontSize : ed->getEditorFontSize());
+        }
         ed->applyThemeStyles(ed->currentLanguage());
         if (globalFg != -1 || globalBg != -1) {
             ed->applyGlobalStyleOverride(globalFg, globalBg);
@@ -1557,7 +1637,8 @@ void MainWindow::reloadStyleOverrides() {
 }
 
 void MainWindow::onShortcutsMapper() {
-    ShortcutsDialog dlg(this);
+    // 第一个 this 是「真实 QAction 的来源」，第二个是 Qt 的父窗口。
+    ShortcutsDialog dlg(this, this);
     dlg.exec();
 }
 
@@ -1592,6 +1673,10 @@ void MainWindow::applyPreferences(const AppPreferences& prefs) {
             dropBackup(_tabManager->editorAt(i));
         }
     }
+
+    // applyPreferencesToEditor() 用首选项字体重置了所有样式槽位，必须再把用户在
+    // 样式配置器里设的槽位字体/字号盖回去，否则改一次首选项就把覆盖冲掉了。
+    reloadStyleOverrides();
 }
 
 void MainWindow::applyPreferencesToEditor(EditorView* ed) {

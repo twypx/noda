@@ -1,23 +1,28 @@
 #include "StyleConfigDialog.h"
 #include "../StyleManager.h"
+#include "StyleOverride.h"
+
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QFormLayout>
 #include <QColorDialog>
 #include <QDialogButtonBox>
 #include <QGroupBox>
+#include <QListWidgetItem>
 #include <QSettings>
-#include <QStringList>
+#include <QSignalBlocker>
+#include <QFont>
 
 namespace {
 
-// QColor(RGB) <-> Scintilla/StyleManager 使用的 BGR 整数。
 inline int toBgr(const QColor& c) {
     return (c.blue() << 16) | (c.green() << 8) | c.red();
 }
 inline QColor fromBgr(int bgr) {
     return QColor::fromRgb(bgr & 0xFF, (bgr >> 8) & 0xFF, (bgr >> 16) & 0xFF);
 }
+
+const QLatin1String kGlobalId("global");
 
 } // namespace
 
@@ -27,29 +32,30 @@ StyleConfigDialog::StyleConfigDialog(QWidget* parent)
     , _bgColor(Qt::white)
 {
     setWindowTitle("语言样式配置器 (Style Configurator)");
-    resize(560, 420);
+    resize(590, 440);
     setupUI();
 }
 
 void StyleConfigDialog::setupUI() {
     auto* mainLayout = new QHBoxLayout(this);
 
-    // 左侧：Global Styles + 全部已加载语言（真实 id 存于 UserRole）
     _langList = new QListWidget(this);
     auto* globalItem = new QListWidgetItem("Global Styles (全局默认样式)", _langList);
-    globalItem->setData(Qt::UserRole, QStringLiteral("global"));
+    globalItem->setData(Qt::UserRole, QString(kGlobalId));
     for (const auto& name : StyleManager::instance().languageNames()) {
         auto* item = new QListWidgetItem(QString::fromStdString(name), _langList);
         item->setData(Qt::UserRole, QString::fromStdString(name));
     }
     mainLayout->addWidget(_langList, 1);
 
-    // 右侧：样式设置
     auto* rightWidget = new QWidget(this);
     auto* rightLayout = new QVBoxLayout(rightWidget);
 
-    auto* fontGroup = new QGroupBox("字体样式", rightWidget);
+    auto* fontGroup = new QGroupBox("样式槽位与字体", rightWidget);
     auto* fontLayout = new QFormLayout(fontGroup);
+    _styleCombo = new QComboBox(this);
+    _styleCombo->setObjectName(QStringLiteral("styleSlotCombo"));
+    fontLayout->addRow("样式槽位:", _styleCombo);
     _fontCombo = new QFontComboBox(this);
     _fontCombo->setCurrentFont(QFont("Monospace"));
     _fontSizeSpin = new QSpinBox(this);
@@ -67,24 +73,14 @@ void StyleConfigDialog::setupUI() {
     auto* colorLayout = new QFormLayout(colorGroup);
     _btnFgColor = new QPushButton("选择前景色...", this);
     _btnBgColor = new QPushButton("选择背景色...", this);
-
     connect(_btnFgColor, &QPushButton::clicked, this, [this]() {
-        QColor col = QColorDialog::getColor(_fgColor, this, "选择前景色");
-        if (col.isValid()) {
-            _fgColor = col;
-            _btnFgColor->setStyleSheet(QString("background-color: %1; color: %2;")
-                .arg(col.name(), col.lightness() < 128 ? "white" : "black"));
-        }
+        const QColor col = QColorDialog::getColor(_fgColor, this, "选择前景色");
+        if (col.isValid()) { _fgColor = col; updateColorButtons(); }
     });
     connect(_btnBgColor, &QPushButton::clicked, this, [this]() {
-        QColor col = QColorDialog::getColor(_bgColor, this, "选择背景色");
-        if (col.isValid()) {
-            _bgColor = col;
-            _btnBgColor->setStyleSheet(QString("background-color: %1; color: %2;")
-                .arg(col.name(), col.lightness() < 128 ? "white" : "black"));
-        }
+        const QColor col = QColorDialog::getColor(_bgColor, this, "选择背景色");
+        if (col.isValid()) { _bgColor = col; updateColorButtons(); }
     });
-
     colorLayout->addRow("前景色:", _btnFgColor);
     colorLayout->addRow("背景色:", _btnBgColor);
     rightLayout->addWidget(colorGroup);
@@ -95,59 +91,149 @@ void StyleConfigDialog::setupUI() {
     rightLayout->addWidget(_hintLabel);
 
     auto* btnBox = new QDialogButtonBox(QDialogButtonBox::Apply | QDialogButtonBox::Close, this);
-    connect(btnBox->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, &StyleConfigDialog::onApply);
-    connect(btnBox->button(QDialogButtonBox::Close), &QPushButton::clicked, this, &QDialog::accept);
+    connect(btnBox->button(QDialogButtonBox::Apply), &QPushButton::clicked,
+            this, &StyleConfigDialog::onApply);
+    connect(btnBox->button(QDialogButtonBox::Close), &QPushButton::clicked,
+            this, &QDialog::accept);
     rightLayout->addWidget(btnBox);
 
     mainLayout->addWidget(rightWidget, 2);
 
-    connect(_langList, &QListWidget::currentRowChanged, this, &StyleConfigDialog::onLanguageSelected);
+    connect(_langList, &QListWidget::currentRowChanged,
+            this, &StyleConfigDialog::onLanguageSelected);
+    connect(_styleCombo, &QComboBox::currentIndexChanged,
+            this, &StyleConfigDialog::onStyleSlotChanged);
     _langList->setCurrentRow(0);
 }
 
 QString StyleConfigDialog::currentLangId() const {
     auto* item = _langList->currentItem();
-    return item ? item->data(Qt::UserRole).toString() : QStringLiteral("global");
+    return item ? item->data(Qt::UserRole).toString() : QString(kGlobalId);
+}
+
+void StyleConfigDialog::updateColorButtons() {
+    auto paint = [](QPushButton* button, const QColor& color) {
+        button->setStyleSheet(QStringLiteral("background-color: %1; color: %2;")
+            .arg(color.name(),
+                 color.lightness() < 128 ? QStringLiteral("white") : QStringLiteral("black")));
+    };
+    paint(_btnFgColor, _fgColor);
+    paint(_btnBgColor, _bgColor);
 }
 
 void StyleConfigDialog::onLanguageSelected(int row) {
     Q_UNUSED(row);
     const QString id = currentLangId();
-    _hintLabel->setText(QString("正在编辑: %1 （样式槽位 0 / 默认文本）。点击“应用”后立即对所有打开文档生效，并持久化到用户配置。")
-        .arg(id == "global" ? "Global Styles" : id));
 
-    // 回填该语言此前保存的覆盖值（若有）
-    QSettings s;
-    s.beginGroup("styleOverride");
-    if (s.contains(id)) {
-        const QStringList parts = s.value(id).toString().split(';');
-        if (parts.size() >= 2) {
-            _fgColor = fromBgr(parts[0].toInt());
-            _bgColor = fromBgr(parts[1].toInt());
-            _boldCheck->setChecked(parts.size() >= 3 && parts[2].toInt() != 0);
-            _italicCheck->setChecked(parts.size() >= 4 && parts[3].toInt() != 0);
-            _btnFgColor->setStyleSheet(QString("background-color: %1").arg(_fgColor.name()));
-            _btnBgColor->setStyleSheet(QString("background-color: %1").arg(_bgColor.name()));
+    _styleCombo->blockSignals(true);
+    _styleCombo->clear();
+    if (id == kGlobalId) {
+        _styleCombo->addItem(QStringLiteral("全局默认文本"), 0);
+    } else {
+        const auto* styles = StyleManager::instance().getStyles(id.toStdString());
+        if (styles) {
+            for (const auto& s : *styles) {
+                const QString label = QStringLiteral("%1  [styleID %2]")
+                    .arg(s.name.empty() ? QStringLiteral("未命名样式")
+                                        : QString::fromStdString(s.name))
+                    .arg(s.styleID);
+                _styleCombo->addItem(label, s.styleID);
+            }
+        }
+        if (_styleCombo->count() == 0)
+            _styleCombo->addItem(QStringLiteral("默认文本"), 0);
+    }
+    _styleCombo->setCurrentIndex(0);
+    _styleCombo->blockSignals(false);
+    onStyleSlotChanged(_styleCombo->currentIndex());
+}
+
+void StyleConfigDialog::onStyleSlotChanged(int index) {
+    if (index < 0 || !_styleCombo) return;
+    const QString id = currentLangId();
+    const int styleId = _styleCombo->itemData(index).toInt();
+
+    QColor fg = Qt::black;
+    QColor bg = Qt::white;
+    bool bold = false;
+    bool italic = false;
+    QString family = QStringLiteral("Monospace");
+    int size = 10;
+
+    if (id == kGlobalId) {
+        const GlobalStyles& g = StyleManager::instance().getGlobalStyles();
+        if (g.defaultFg >= 0) fg = fromBgr(g.defaultFg);
+        if (g.defaultBg >= 0) bg = fromBgr(g.defaultBg);
+        family = QString::fromStdString(g.defaultFont);
+        size = g.defaultFontSize > 0 ? g.defaultFontSize : 10;
+    } else if (const auto* styles = StyleManager::instance().getStyles(id.toStdString())) {
+        for (const auto& s : *styles) {
+            if (s.styleID != styleId) continue;
+            if (s.fgColor >= 0) fg = fromBgr(s.fgColor);
+            if (s.bgColor >= 0) bg = fromBgr(s.bgColor);
+            bold = s.bold;
+            italic = s.italic;
+            if (!s.fontName.empty()) family = QString::fromStdString(s.fontName);
+            if (s.fontSize > 0) size = s.fontSize;
+            break;
         }
     }
-    s.endGroup();
+
+    QSettings settings;
+    settings.beginGroup("styleOverride");
+    const QString key = StyleOverride::settingsKey(id, styleId);
+    QString value = settings.value(key).toString();
+    if (value.isEmpty() && styleId == 0) value = settings.value(id).toString();
+    settings.endGroup();
+    const auto override = StyleOverride::deserialize(key, value);
+    if (override) {
+        if (override->fg >= 0) fg = fromBgr(override->fg);
+        if (override->bg >= 0) bg = fromBgr(override->bg);
+        bold = override->bold;
+        italic = override->italic;
+        if (!override->fontName.isEmpty()) family = override->fontName;
+        if (override->fontSize > 0) size = override->fontSize;
+    }
+
+    {
+        QSignalBlocker blockFont(_fontCombo);
+        _fontCombo->setCurrentFont(QFont(family));
+        QSignalBlocker blockSize(_fontSizeSpin);
+        _fontSizeSpin->setValue(qBound(_fontSizeSpin->minimum(), size, _fontSizeSpin->maximum()));
+    }
+    _boldCheck->setChecked(bold);
+    _italicCheck->setChecked(italic);
+    _fgColor = fg;
+    _bgColor = bg;
+    updateColorButtons();
+
+    _hintLabel->setText(QStringLiteral("正在编辑：%1 / %2。字体、字号、颜色与粗斜体在“应用”后对所有文档生效并持久化。")
+        .arg(id == kGlobalId ? QStringLiteral("全局默认样式") : id,
+             _styleCombo->itemText(index)));
 }
 
 void StyleConfigDialog::onApply() {
     const QString id = currentLangId();
-    // 约定值格式: "fgBgr;bgBgr;bold;italic"。字体族/字号沿用首选项的全局编辑器字体，
-    // 这里聚焦于颜色与粗斜体覆盖，避免与 Preferences 的字体设置相互打架。
-    const QString value = QString("%1;%2;%3;%4")
-        .arg(toBgr(_fgColor))
-        .arg(toBgr(_bgColor))
-        .arg(_boldCheck->isChecked() ? 1 : 0)
-        .arg(_italicCheck->isChecked() ? 1 : 0);
+    const int styleId = _styleCombo->currentData().toInt();
 
-    QSettings s;
-    s.beginGroup("styleOverride");
-    s.setValue(id, value);
-    s.endGroup();
+    StyleOverride o;
+    o.langId = id;
+    o.styleId = styleId;
+    o.fg = toBgr(_fgColor);
+    o.bg = toBgr(_bgColor);
+    o.bold = _boldCheck->isChecked();
+    o.italic = _italicCheck->isChecked();
+    o.fontName = _fontCombo->currentFont().family();
+    o.fontSize = _fontSizeSpin->value();
+
+    QSettings settings;
+    settings.beginGroup("styleOverride");
+    // styleId 0 与旧格式键等价，写新键前删旧键，避免两份覆盖按不确定顺序互相覆盖。
+    if (styleId == 0) settings.remove(id);
+    settings.setValue(StyleOverride::settingsKey(id, styleId), o.serialize());
+    settings.endGroup();
 
     emit styleUpdated();
-    _hintLabel->setText(QString("已应用并保存到配置：%1").arg(id == "global" ? "Global Styles" : id));
+    _hintLabel->setText(QStringLiteral("已应用并保存：%1 / %2（字体 %3 %4pt）")
+        .arg(id, _styleCombo->currentText(), o.fontName).arg(o.fontSize));
 }

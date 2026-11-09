@@ -5,6 +5,7 @@
 #include "ILexer.h"
 #include "Lexilla.h"
 #include <QFile>
+#include <QSaveFile>
 #include <QFileInfo>
 #include <QByteArray>
 #include <QApplication>
@@ -470,37 +471,79 @@ void EditorView::applyFormattedText(const std::string& formattedUtf8) {
     updateLineNumberMarginWidth();
 }
 
-bool EditorView::saveToFile(const QString& savePath) {
-    QString targetPath = savePath.isEmpty() ? QString::fromStdString(_buffer->getFilePath()) : savePath;
-    if (targetPath.isEmpty()) {
+bool EditorView::writeEncodedFile(const QString& path, const std::string& utf8,
+                                  const std::string& enc) {
+    _lastSaveError.clear();
+
+    // QSaveFile 先写同目录临时文件、commit() 时原子替换。转码/写盘失败都会丢掉临时文件，
+    // 既不会截断已存在的原文件，也不会留下半个文件 —— 这是「不丢数据」的底线。
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        _lastSaveError = QStringLiteral("无法写入 %1：%2").arg(path, file.errorString());
         return false;
     }
 
-    QFile file(targetPath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        return false;
-    }
-
-    // 先取得文档当前的 UTF-8 字节，再按缓冲区编码真实转码写盘（含 BOM）。
-    const std::string enc = _buffer->getEncoding();
     const std::string bom = Encoding::bomForSave(enc);
-    if (!bom.empty()) {
-        file.write(bom.data(), static_cast<qint64>(bom.size()));
+    if (!bom.empty()
+        && file.write(bom.data(), static_cast<qint64>(bom.size())) != static_cast<qint64>(bom.size())) {
+        _lastSaveError = QStringLiteral("写入 BOM 失败：%1").arg(file.errorString());
+        file.cancelWriting();
+        return false;
     }
 
-    std::string utf8 = currentTextUtf8();
-    Encoding::encodeFromUtf8Chunks(utf8.data(), utf8.size(), enc,
-        [&](const char* d, size_t n) {
-            file.write(d, static_cast<qint64>(n));
+    bool writeOk = true;
+    const bool convOk = Encoding::encodeFromUtf8Chunks(utf8.data(), utf8.size(), enc,
+        [&file, &writeOk](const char* d, std::size_t n) {
+            if (!writeOk) return;
+            writeOk = file.write(d, static_cast<qint64>(n)) == static_cast<qint64>(n);
         });
-    file.close();
+    if (!convOk) {
+        _lastSaveError = QStringLiteral("不支持的编码「%1」，未写入任何内容")
+                             .arg(QString::fromStdString(enc));
+        file.cancelWriting();
+        return false;
+    }
+    if (!writeOk) {
+        _lastSaveError = QStringLiteral("写盘失败：%1").arg(file.errorString());
+        file.cancelWriting();
+        return false;
+    }
+    if (!file.commit()) {
+        _lastSaveError = QStringLiteral("提交文件失败：%1").arg(file.errorString());
+        return false;
+    }
+    return true;
+}
+
+bool EditorView::saveToFile(const QString& savePath) {
+    const QString targetPath = savePath.isEmpty()
+        ? QString::fromStdString(_buffer->getFilePath()) : savePath;
+    if (targetPath.isEmpty()) {
+        _lastSaveError = QStringLiteral("未指定保存路径");
+        return false;
+    }
+
+    const std::string enc = _buffer->getEncoding();
+    if (!writeEncodedFile(targetPath, currentTextUtf8(), enc)) {
+        // 失败时绝不 SETSAVEPOINT，文档保持「未保存」，用户可换编码重试。
+        return false;
+    }
 
     send(SCI_SETSAVEPOINT);
     _buffer->setFilePath(targetPath.toStdString());
     _buffer->setModified(false);
     emit documentModified(false);
-
     return true;
+}
+
+bool EditorView::saveCopyToFile(const QString& filePath) {
+    if (filePath.isEmpty()) {
+        _lastSaveError = QStringLiteral("未指定拷贝目标路径");
+        return false;
+    }
+    // 与保存共用事务写盘链路（BOM + 真实转码），但绝不触碰 filePath / savepoint /
+    // modified / 文件监控；非 UTF-8 文档得到的才是正确编码的副本。
+    return writeEncodedFile(filePath, currentTextUtf8(), _buffer->getEncoding());
 }
 
 void EditorView::applyLanguage(const std::string& langName) {
@@ -649,6 +692,12 @@ void EditorView::applyThemeStyles(const std::string& langName) {
         }
         send(SCI_STYLESETBOLD, s.styleID, s.bold ? 1 : 0);
         send(SCI_STYLESETITALIC, s.styleID, s.italic ? 1 : 0);
+        // 样式配置器可按槽位单独指定字体族/字号；空值表示沿用全局编辑器字体。
+        // 这里排在 applyLanguage()/setEditorFont() 之后执行，才不会被全局字体重置冲掉。
+        if (!s.fontName.empty())
+            sends(SCI_STYLESETFONT, s.styleID, s.fontName.c_str());
+        if (s.fontSize > 0)
+            send(SCI_STYLESETSIZE, s.styleID, s.fontSize);
     }
 
     if (_isDarkMode) {
@@ -1695,6 +1744,26 @@ void EditorView::toggleCurrentFold() {
     auto pos = send(SCI_GETCURRENTPOS);
     auto line = send(SCI_LINEFROMPOSITION, pos);
     send(SCI_TOGGLEFOLD, line);
+}
+
+sptr_t EditorView::currentFoldHeader() const {
+    const sptr_t pos = send(SCI_GETCURRENTPOS);
+    const sptr_t line = send(SCI_LINEFROMPOSITION, pos);
+    if (send(SCI_GETFOLDLEVEL, line) & SC_FOLDLEVELHEADERFLAG) return line;
+    // 光标在块内普通行时，操作对象是它所属的父块。
+    return send(SCI_GETFOLDPARENT, line);
+}
+
+void EditorView::foldCurrent() {
+    const sptr_t header = currentFoldHeader();
+    if (header < 0) return;
+    if (send(SCI_GETFOLDEXPANDED, header)) send(SCI_TOGGLEFOLD, header);
+}
+
+void EditorView::expandCurrent() {
+    const sptr_t header = currentFoldHeader();
+    if (header < 0) return;
+    if (!send(SCI_GETFOLDEXPANDED, header)) send(SCI_TOGGLEFOLD, header);
 }
 
 void EditorView::foldLevel(int level) {

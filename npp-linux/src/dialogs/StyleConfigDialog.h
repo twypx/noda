@@ -5,6 +5,7 @@
 #include <QFontComboBox>
 #include <QSpinBox>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QPushButton>
 #include <QLabel>
 #include <QColor>
@@ -20,13 +21,16 @@ signals:
 
 private slots:
     void onLanguageSelected(int row);
+    void onStyleSlotChanged(int index);
     void onApply();
 
 private:
     void setupUI();
-    QString currentLangId() const;      // 当前选中行的语言 id（"global" 表示全局默认样式）
+    void updateColorButtons();
+    QString currentLangId() const;
 
     QListWidget* _langList;
+    QComboBox* _styleCombo;             // 该语言的全部 WordsStyle 槽位，data = styleID
     QFontComboBox* _fontCombo;
     QSpinBox* _fontSizeSpin;
     QCheckBox* _boldCheck;
