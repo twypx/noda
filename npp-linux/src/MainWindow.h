@@ -258,13 +258,15 @@ private:
     void applyPreferencesToEditor(EditorView* ed);
     void openDroppedUrl(const QUrl& url);
 
+    friend class TestMainWindow;
+
     // ---- 会话快照（session.xml + backup/）----
     // 复刻 Notepad++ 的“记住上次会话 + 周期性备份”：退出时不弹保存询问，
     // 脏内容落盘到 backup/，下次启动按 session.xml 原样恢复。
     bool restoreSession();
     void saveSession();
     QVector<SessionFile> collectSessionFiles(int& activeIndex) const;
-    void syncBackups();
+    Q_INVOKABLE void syncBackups();
     void dropBackup(EditorView* ed);
     SessionFile captureSessionFile(EditorView* ed) const;
     void restartBackupTimer();

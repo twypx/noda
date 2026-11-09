@@ -117,3 +117,77 @@ void TestEditorSave::saveCopyFailureWritesNothing() {
     QVERIFY2(!QFile::exists(copy), "转码失败不能留下半成品副本");
     QVERIFY(ed.lastSaveError().contains("NO-SUCH-CHARSET-NPP"));
 }
+
+void TestEditorSave::loadFromFileDoesNotCreateUndoStep() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath("test_load.txt");
+    QVERIFY(put(path, QByteArray("Line1\nLine2\nLine3\n")));
+
+    EditorView ed;
+    QVERIFY(ed.loadFromFile(path));
+    // 载入后不应有可撤销动作
+    QCOMPARE(ed.send(SCI_CANUNDO), sptr_t(0));
+
+    // 执行 Undo 后内容不应丢失
+    ed.doUndo();
+    QCOMPARE(ed.currentTextUtf8(), std::string("Line1\nLine2\nLine3\n"));
+    QCOMPARE(ed.send(SCI_CANUNDO), sptr_t(0));
+}
+
+void TestEditorSave::columnInsertVirtualSpacesBlock() {
+    EditorView ed;
+    // 构造两行短文本，并在第 8 列建立跨行矩形选区（超出行尾的虚拟空格区）
+    ed.setTextFromUtf8("A\nB\n");
+    ed.send(SCI_SETRECTANGULARSELECTIONANCHOR, 0);
+    ed.send(SCI_SETRECTANGULARSELECTIONANCHORVIRTUALSPACE, 5);
+    ed.send(SCI_SETRECTANGULARSELECTIONCARET, 2);
+    ed.send(SCI_SETRECTANGULARSELECTIONCARETVIRTUALSPACE, 5);
+
+    ed.columnInsertText("Z");
+    const std::string text = ed.currentTextUtf8();
+    QCOMPARE(text, std::string("A    Z\nB    Z\n"));
+
+    // 单步撤销
+    ed.doUndo();
+    QCOMPARE(ed.currentTextUtf8(), std::string("A\nB\n"));
+}
+
+void TestEditorSave::sortLinesSupportsCrAndUndo() {
+    EditorView ed;
+    ed.setTextFromUtf8("banana\rappele\r");
+    ed.convertLineEndings(LineEnding::CR);
+    QCOMPARE(ed.buffer()->getLineEnding(), LineEnding::CR);
+
+    ed.sortLines(true, false);
+    // 排序后换行风格必须仍为 CR，不能被破坏成 LF
+    QCOMPARE(ed.currentTextUtf8(), std::string("appele\rbanana\r"));
+
+    // 撤销必须完整回退到原顺序
+    ed.doUndo();
+    QCOMPARE(ed.currentTextUtf8(), std::string("banana\rappele\r"));
+}
+
+void TestEditorSave::lineNumberMarginWidthDigitsCaching() {
+    EditorView ed;
+    QCOMPARE(ed.lineNumberMarginDigits(), 4);
+    auto width4 = ed.send(SCI_GETMARGINWIDTHN, 0);
+    QVERIFY(width4 > 0);
+
+    // 增加到 50 行（仍处于 4 位数基线内）
+    std::string text50;
+    for (int i = 0; i < 50; ++i) text50 += "line\n";
+    ed.setTextFromUtf8(text50);
+    QCOMPARE(ed.lineNumberMarginDigits(), 4);
+    QCOMPARE(ed.send(SCI_GETMARGINWIDTHN, 0), width4);
+
+    // 增加到 12000 行（升级到 5 位数）
+    std::string text12000;
+    for (int i = 0; i < 12000; ++i) text12000 += "line\n";
+    ed.setTextFromUtf8(text12000);
+    QCOMPARE(ed.lineNumberMarginDigits(), 5);
+    QVERIFY(ed.send(SCI_GETMARGINWIDTHN, 0) > width4);
+}
+
+
+

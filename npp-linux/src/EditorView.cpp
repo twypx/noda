@@ -28,7 +28,12 @@ EditorView::EditorView(QWidget* parent)
 
     connect(this, &ScintillaEditBase::savePointChanged, this, [this](bool dirty) {
         _buffer->setModified(dirty);
+        if (dirty) _buffer->setBackupDirty(true);
         emit documentModified(dirty);
+    });
+
+    connect(this, &ScintillaEditBase::notifyChange, this, [this]() {
+        _buffer->setBackupDirty(true);
     });
 
     connect(this, &ScintillaEditBase::updateUi, this, &EditorView::onUpdateUi);
@@ -124,10 +129,10 @@ void EditorView::setupMarkdownStyles(bool isDark) {
 
 void EditorView::setShowLineNumbers(bool show) {
     _showLineNumbers = show;
-    updateLineNumberMarginWidth();
+    updateLineNumberMarginWidth(true);
 }
 
-void EditorView::updateLineNumberMarginWidth() {
+void EditorView::updateLineNumberMarginWidth(bool force) {
     if (!_showLineNumbers) {
         send(SCI_SETMARGINWIDTHN, 0, 0);
         return;
@@ -141,6 +146,11 @@ void EditorView::updateLineNumberMarginWidth() {
         digits++;
     }
     digits = std::max(digits, 4);
+
+    if (!force && digits == _lastLineDigits) {
+        return;
+    }
+    _lastLineDigits = digits;
 
     std::string testStr(digits, '9');
     auto textWidth = send(SCI_TEXTWIDTH, STYLE_LINENUMBER, reinterpret_cast<sptr_t>(testStr.c_str()));
@@ -237,6 +247,7 @@ void EditorView::initEditorDefaults() {
     // 4. 基础字符编码与排版
     send(SCI_SETCODEPAGE, SC_CP_UTF8);
     send(SCI_SETWRAPMODE, SC_WRAP_NONE);
+    send(SCI_SETIDLESTYLING, SC_IDLESTYLING_TOVISIBLE);
 
     send(SCI_SETTABWIDTH, 4);
     send(SCI_SETUSETABS, 0);
@@ -255,7 +266,7 @@ void EditorView::initEditorDefaults() {
     }
 
     updateEditorChromeStyles();
-    updateLineNumberMarginWidth();
+    updateLineNumberMarginWidth(true);
 }
 
 bool EditorView::loadFromFile(const QString& filePath, const std::string& forcedEnc) {
@@ -312,17 +323,27 @@ bool EditorView::loadFromFile(const QString& filePath, const std::string& forced
 
     // 3. 剥离 BOM，并把磁盘字节按 enc 真正转码为 UTF-8 后分块写入 Scintilla。
     //    这一步修复了历史上 GBK/UTF-16 文件被当作 UTF-8 直接塞入而乱码的问题。
+    //    载入期间关闭撤销收集并预分配缓冲，避免膨胀撤销栈与频繁 realloc。
     size_t bom = Encoding::bomLength(base, len);
+    send(SCI_SETUNDOCOLLECTION, 0);
     send(SCI_CLEARALL);
+    if (len > bom) {
+        send(SCI_ALLOCATE, static_cast<uptr_t>(len - bom));
+    }
     Encoding::decodeToUtf8Chunks(base + bom, len - bom, enc,
         [this](const char* d, size_t n) {
             if (n) sends(SCI_ADDTEXT, n, d);
         });
 
     // 解码后的 UTF-8 重新判定并规整换行（UTF-16 源文件的 LF/CR 只有在解码后才可见）。
+    // 仅取头部最多 4MB 样本判定，消除大文件多余的全文内存拷贝。
     if (Encoding::isUtf16(enc)) {
-        std::string decoded = currentTextUtf8();
-        LineEnding decodedLe = DocumentBuffer::detectLineEnding(decoded);
+        const size_t docLen = static_cast<size_t>(send(SCI_GETLENGTH));
+        const size_t probeLen = std::min<size_t>(docLen, 4u << 20);
+        std::string sample;
+        sample.resize(probeLen);
+        send(SCI_GETTEXT, probeLen + 1, reinterpret_cast<sptr_t>(sample.data()));
+        LineEnding decodedLe = DocumentBuffer::detectLineEnding(sample);
         _buffer->setLineEnding(decodedLe);
         int dmode = (decodedLe == LineEnding::CRLF) ? SC_EOL_CRLF : (decodedLe == LineEnding::CR) ? SC_EOL_CR : SC_EOL_LF;
         send(SCI_SETEOLMODE, dmode);
@@ -331,6 +352,9 @@ bool EditorView::loadFromFile(const QString& filePath, const std::string& forced
     if (_buffer->getLineEnding() == LineEnding::CR) {
         send(SCI_CONVERTEOLS, SC_EOL_CR);
     }
+
+    send(SCI_SETUNDOCOLLECTION, 1);
+    send(SCI_EMPTYUNDOBUFFER);
 
     if (mapped) {
         ::munmap(const_cast<char*>(base), static_cast<size_t>(st.st_size));
@@ -532,6 +556,7 @@ bool EditorView::saveToFile(const QString& savePath) {
     send(SCI_SETSAVEPOINT);
     _buffer->setFilePath(targetPath.toStdString());
     _buffer->setModified(false);
+    _buffer->setBackupDirty(false);
     emit documentModified(false);
     return true;
 }
@@ -567,7 +592,7 @@ void EditorView::applyLanguage(const std::string& langName) {
 
     // 3. 应用全局部件外观（行号、选区、折叠列等，严格跟随当前深浅色模式）
     updateEditorChromeStyles();
-    updateLineNumberMarginWidth();
+    updateLineNumberMarginWidth(true);
 
     // 4. 清除现有关键字槽位残留
     for (int k = 0; k <= 8; ++k) {
@@ -642,9 +667,15 @@ void EditorView::applyLanguage(const std::string& langName) {
     send(SCI_SETPROPERTY, reinterpret_cast<uptr_t>("fold.hypertext.comment"), reinterpret_cast<sptr_t>("1"));
     send(SCI_SETPROPERTY, reinterpret_cast<uptr_t>("fold.comment"), reinterpret_cast<sptr_t>("1"));
 
-    // 7. 核心：重置整篇文档已有字符的样式字节，并全量强制重新染色
+    // 7. 核心：重置整篇文档已有字符的样式字节，并重新染色
+    // 大文件（> 2MB）避免同步 SCI_COLOURISE(0, -1) 阻塞主线程，依靠 SC_IDLESTYLING_TOVISIBLE 自动视口/空闲着色
     send(SCI_CLEARDOCUMENTSTYLE);
-    send(SCI_COLOURISE, 0, -1);
+    const auto docLen = send(SCI_GETLENGTH);
+    if (docLen > 2 * 1024 * 1024) {
+        send(SCI_COLOURISE, 0, 65536);
+    } else {
+        send(SCI_COLOURISE, 0, -1);
+    }
     emit languageChanged(QString::fromStdString(langName));
 }
 
@@ -669,7 +700,7 @@ void EditorView::setEditorFont(const QString& fontName, int fontSize) {
         setupMarkdownStyles(_isDarkMode);
     }
 
-    updateLineNumberMarginWidth();
+    updateLineNumberMarginWidth(true);
 }
 
 void EditorView::applyThemeStyles(const std::string& langName) {
@@ -716,7 +747,7 @@ void EditorView::applyThemeStyles(const std::string& langName) {
 void EditorView::setDarkMode(bool dark) {
     _isDarkMode = dark;
     updateEditorChromeStyles();
-    updateLineNumberMarginWidth();
+    updateLineNumberMarginWidth(true);
 
     if (_currentLang == "markdown") {
         setupMarkdownStyles(dark);
@@ -855,8 +886,10 @@ void EditorView::applyColumnPayload(QVector<ColumnLine>& lines, const ColumnPayl
         if (hasVirtualSpc) {
             // 选区伸到了行尾之外（只有虚拟空格没有实字符），先按行尾对齐补成真空格，
             // 否则 target 区间会超出行尾而无法替换。
-            for (sptr_t j = 0, k = cl.selLpos; j < cl.virtualCaret; ++j, ++k) {
-                send(SCI_INSERTTEXT, k, reinterpret_cast<sptr_t>(" "));
+            // 性能优化：直接构造指定长度的空格串一次性插入，消除原逐字符循环调用的开销
+            if (cl.virtualCaret > 0) {
+                std::string spc(static_cast<size_t>(cl.virtualCaret), ' ');
+                sends(SCI_INSERTTEXT, cl.selLpos, spc.c_str());
             }
             cl.selLpos += cl.virtualAnchor;
             cl.selRpos += cl.virtualCaret;
@@ -1307,9 +1340,15 @@ void EditorView::sortLines(bool ascending, bool ignoreCase) {
     if (selStart != selEnd) {
         lineStart = static_cast<int>(send(SCI_LINEFROMPOSITION, selStart));
         lineEnd = static_cast<int>(send(SCI_LINEFROMPOSITION, selEnd));
+        if (lineEnd > lineStart && selEnd == send(SCI_POSITIONFROMLINE, lineEnd)) {
+            lineEnd--;
+        }
     } else {
         lineStart = 0;
         lineEnd = static_cast<int>(send(SCI_GETLINECOUNT)) - 1;
+        if (lineEnd > lineStart && send(SCI_LINELENGTH, lineEnd) == 0) {
+            lineEnd--;
+        }
     }
     if (lineEnd <= lineStart) return;
 
@@ -1331,7 +1370,8 @@ void EditorView::sortLines(bool ascending, bool ignoreCase) {
     };
     std::sort(lines.begin(), lines.end(), comp);
 
-    QString eol = (_buffer->getLineEnding() == LineEnding::CRLF) ? "\r\n" : "\n";
+    QString eol = (_buffer->getLineEnding() == LineEnding::CRLF) ? "\r\n"
+                : (_buffer->getLineEnding() == LineEnding::CR) ? "\r" : "\n";
     QString joined = lines.join(eol);
     if (lineEnd < send(SCI_GETLINECOUNT) - 1) {
         joined += eol;
@@ -1339,8 +1379,10 @@ void EditorView::sortLines(bool ascending, bool ignoreCase) {
 
     auto startPos = send(SCI_POSITIONFROMLINE, lineStart);
     auto endPos = (lineEnd < send(SCI_GETLINECOUNT) - 1) ? send(SCI_POSITIONFROMLINE, lineEnd + 1) : send(SCI_GETLENGTH);
+    send(SCI_BEGINUNDOACTION);
     send(SCI_SETSEL, startPos, endPos);
     sends(SCI_REPLACESEL, 0, joined.toUtf8().constData());
+    send(SCI_ENDUNDOACTION);
 }
 
 void EditorView::removeDuplicateLines() {
@@ -1351,9 +1393,15 @@ void EditorView::removeDuplicateLines() {
     if (selStart != selEnd) {
         lineStart = static_cast<int>(send(SCI_LINEFROMPOSITION, selStart));
         lineEnd = static_cast<int>(send(SCI_LINEFROMPOSITION, selEnd));
+        if (lineEnd > lineStart && selEnd == send(SCI_POSITIONFROMLINE, lineEnd)) {
+            lineEnd--;
+        }
     } else {
         lineStart = 0;
         lineEnd = static_cast<int>(send(SCI_GETLINECOUNT)) - 1;
+        if (lineEnd > lineStart && send(SCI_LINELENGTH, lineEnd) == 0) {
+            lineEnd--;
+        }
     }
     if (lineEnd < lineStart) return;
 
@@ -1373,7 +1421,8 @@ void EditorView::removeDuplicateLines() {
         }
     }
 
-    QString eol = (_buffer->getLineEnding() == LineEnding::CRLF) ? "\r\n" : "\n";
+    QString eol = (_buffer->getLineEnding() == LineEnding::CRLF) ? "\r\n"
+                : (_buffer->getLineEnding() == LineEnding::CR) ? "\r" : "\n";
     QString joined = uniqueLines.join(eol);
     if (lineEnd < send(SCI_GETLINECOUNT) - 1) {
         joined += eol;
@@ -1381,8 +1430,10 @@ void EditorView::removeDuplicateLines() {
 
     auto startPos = send(SCI_POSITIONFROMLINE, lineStart);
     auto endPos = (lineEnd < send(SCI_GETLINECOUNT) - 1) ? send(SCI_POSITIONFROMLINE, lineEnd + 1) : send(SCI_GETLENGTH);
+    send(SCI_BEGINUNDOACTION);
     send(SCI_SETSEL, startPos, endPos);
     sends(SCI_REPLACESEL, 0, joined.toUtf8().constData());
+    send(SCI_ENDUNDOACTION);
 }
 
 void EditorView::reverseLines() {
@@ -1393,9 +1444,15 @@ void EditorView::reverseLines() {
     if (selStart != selEnd) {
         lineStart = static_cast<int>(send(SCI_LINEFROMPOSITION, selStart));
         lineEnd = static_cast<int>(send(SCI_LINEFROMPOSITION, selEnd));
+        if (lineEnd > lineStart && selEnd == send(SCI_POSITIONFROMLINE, lineEnd)) {
+            lineEnd--;
+        }
     } else {
         lineStart = 0;
         lineEnd = static_cast<int>(send(SCI_GETLINECOUNT)) - 1;
+        if (lineEnd > lineStart && send(SCI_LINELENGTH, lineEnd) == 0) {
+            lineEnd--;
+        }
     }
     if (lineEnd <= lineStart) return;
 
@@ -1412,7 +1469,8 @@ void EditorView::reverseLines() {
     }
     std::reverse(lines.begin(), lines.end());
 
-    QString eol = (_buffer->getLineEnding() == LineEnding::CRLF) ? "\r\n" : "\n";
+    QString eol = (_buffer->getLineEnding() == LineEnding::CRLF) ? "\r\n"
+                : (_buffer->getLineEnding() == LineEnding::CR) ? "\r" : "\n";
     QString joined = lines.join(eol);
     if (lineEnd < send(SCI_GETLINECOUNT) - 1) {
         joined += eol;
@@ -1420,8 +1478,10 @@ void EditorView::reverseLines() {
 
     auto startPos = send(SCI_POSITIONFROMLINE, lineStart);
     auto endPos = (lineEnd < send(SCI_GETLINECOUNT) - 1) ? send(SCI_POSITIONFROMLINE, lineEnd + 1) : send(SCI_GETLENGTH);
+    send(SCI_BEGINUNDOACTION);
     send(SCI_SETSEL, startPos, endPos);
     sends(SCI_REPLACESEL, 0, joined.toUtf8().constData());
+    send(SCI_ENDUNDOACTION);
 }
 
 void EditorView::insertEmptyLine(bool above) {
@@ -1534,10 +1594,16 @@ void EditorView::unblockComment() {
 void EditorView::trimTrailingSpaces() {
     send(SCI_BEGINUNDOACTION);
     int lineCount = static_cast<int>(send(SCI_GETLINECOUNT));
-    for (int i = 0; i < lineCount; ++i) {
+    // 逆序处理，且先探测末尾字符，大幅减少 90% 以上无尾部空格行的字符查询与 Gap 搬移
+    for (int i = lineCount - 1; i >= 0; --i) {
         auto lineStart = send(SCI_POSITIONFROMLINE, i);
         auto lineEnd = send(SCI_GETLINEENDPOSITION, i);
-        auto p = lineEnd;
+        if (lineEnd <= lineStart) continue;
+
+        char lastChar = static_cast<char>(send(SCI_GETCHARAT, lineEnd - 1));
+        if (lastChar != ' ' && lastChar != '\t') continue;
+
+        auto p = lineEnd - 1;
         while (p > lineStart) {
             char c = static_cast<char>(send(SCI_GETCHARAT, p - 1));
             if (c == ' ' || c == '\t') {
@@ -1546,9 +1612,7 @@ void EditorView::trimTrailingSpaces() {
                 break;
             }
         }
-        if (p < lineEnd) {
-            send(SCI_DELETERANGE, p, lineEnd - p);
-        }
+        send(SCI_DELETERANGE, p, lineEnd - p);
     }
     send(SCI_ENDUNDOACTION);
 }
@@ -1556,10 +1620,16 @@ void EditorView::trimTrailingSpaces() {
 void EditorView::trimLeadingSpaces() {
     send(SCI_BEGINUNDOACTION);
     int lineCount = static_cast<int>(send(SCI_GETLINECOUNT));
-    for (int i = 0; i < lineCount; ++i) {
+    // 逆序处理，且先探测首字符
+    for (int i = lineCount - 1; i >= 0; --i) {
         auto lineStart = send(SCI_POSITIONFROMLINE, i);
         auto lineEnd = send(SCI_GETLINEENDPOSITION, i);
-        auto p = lineStart;
+        if (lineEnd <= lineStart) continue;
+
+        char firstChar = static_cast<char>(send(SCI_GETCHARAT, lineStart));
+        if (firstChar != ' ' && firstChar != '\t') continue;
+
+        auto p = lineStart + 1;
         while (p < lineEnd) {
             char c = static_cast<char>(send(SCI_GETCHARAT, p));
             if (c == ' ' || c == '\t') {
@@ -1568,9 +1638,7 @@ void EditorView::trimLeadingSpaces() {
                 break;
             }
         }
-        if (p > lineStart) {
-            send(SCI_DELETERANGE, lineStart, p - lineStart);
-        }
+        send(SCI_DELETERANGE, lineStart, p - lineStart);
     }
     send(SCI_ENDUNDOACTION);
 }

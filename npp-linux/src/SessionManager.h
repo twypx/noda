@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QVector>
+#include <string_view>
 
 // Notepad++ 的“会话快照”由两部分组成，缺一不可：
 //   session.xml  —— 记录打开过哪些文件、每个标签的光标/滚动位置、语言、编码；
@@ -36,7 +37,7 @@ public:
     // 时间戳只在第一次为脏缓冲区建立备份时出现，之后这个路径固定不变（同上游）。
     static QString newBackupPath(const QString& displayName);
 
-    static bool writeBackup(const QString& path, const QString& utf8);
+    static bool writeBackup(const QString& path, std::string_view utf8);
     static void removeBackupFile(const QString& path);
 
     // 写 session.xml：先复制一份 session.xml.inCaseOfCorruption.bak（同上游做法），

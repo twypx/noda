@@ -24,7 +24,7 @@ Notepad++ 的 Ubuntu / Linux 原生移植：纯 **C++20 + Qt6 Widgets**，编辑
 |---|---|
 | 系统 | Ubuntu 24.04，Wayland + GNOME |
 | Qt | 6.4.2（`/usr/include/x86_64-linux-gnu/qt6`），需要 `Qt6::Concurrent` |
-| 构建 | CMake ≥ 3.20 + AUTOMOC/AUTORCC + LTO（Release 全量约 5–8 分钟，LTO 串行 60+ 个 LTRANS） |
+| 构建 | CMake ≥ 3.20 + AUTOMOC/AUTORCC + LTO（-flto=auto 多核并行链接） |
 | 测试 | Qt6 Test + CTest，offscreen 平台插件，见 §10 |
 | 依赖包 | `build-essential cmake qt6-base-dev qt6-base-dev-tools`；打包另需 `dpkg-dev` |
 
@@ -93,7 +93,7 @@ cd .. && ./npp-linux/tools/release.sh v1.0.9
 
 v1.0.7 / v1.0.8 已提交：拖拽文件到窗口打开、透明抠图图标重做、**代码格式化**（AStyle + JSON，工作线程执行，含 vendored `third_party/astyle`）。
 
-本轮本地补齐（尚未提交）：**拷贝另存为按真实编码转码**；**保存失败事务化（`QSaveFile`）并显式提示**；**配置载入失败显式诊断**；**样式配置器支持多槽位与字体族/字号**；**快捷键映射器可编辑、自动与真实 QAction 一致、含冲突检测**；**视图菜单补齐「展开层次 1~8」与幂等的折叠/展开当前块**；**标签页右键菜单（复刻上游 TabContextMenu：批量关闭、打开所在文件夹、移到回收站、只读、复制路径、移动标签等）**；Qt Test 回归套件。
+本轮本地补齐（尚未提交）：**拷贝另存为按真实编码转码**；**保存失败事务化（`QSaveFile`）并显式提示**；**配置载入失败显式诊断**；**样式配置器支持多槽位与字体族/字号**；**快捷键映射器可编辑、自动与真实 QAction 一致、含冲突检测**；**视图菜单补齐「展开层次 1~8」与幂等的折叠/展开当前块**；**标签页右键菜单（复刻上游 TabContextMenu：批量关闭、打开所在文件夹、移到回收站、只读、复制路径、移动标签等）**；**目录树自绘展开箭头/层级连接线、整行悬停底色、单击文件夹展开、Dock 关闭按钮 lucide 化**；Qt Test 回归套件。
 
 模块 F（打开文件夹，同样尚未提交）：文件菜单 / 工具栏「打开文件夹」→ 左侧 `QDockWidget` 目录树 → 点击文件复用 `openFile()` 在主区域打开；`QFileSystemModel` 惰性加载、零递归预扫描、图标按后缀缓存、深浅两套 QSS。**未引入 `npp-explorer-plugin` 任何代码**（评估见 `docs/文件夹树技术评估.md`）。
 

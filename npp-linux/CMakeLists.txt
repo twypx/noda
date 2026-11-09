@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 开启高性能编译参数与链接时优化。
 # 不使用 -march=native：它会按构建机 CPU 生成专有指令集，换机运行会 SIGILL；
 # 改用 -mtune=generic（仅调度优化、指令集保持通用基线），既便于分发又不损失单核吞吐。
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -mtune=generic -flto -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -mtune=generic -flto=auto -DNDEBUG")
 
 # GCC/Clang 兼容性：确保 <cstdint> 等基础类型头文件在编译时可见
 add_compile_options(-include cstdint)

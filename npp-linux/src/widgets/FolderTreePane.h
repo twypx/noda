@@ -6,6 +6,7 @@
 #include <QIcon>
 #include <QModelIndex>
 #include <QString>
+#include <QTreeView>
 #include <QtGlobal>
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -17,7 +18,35 @@ using FolderTreeIconProviderBase = QFileIconProvider;
 #endif
 
 class QFileSystemModel;
-class QTreeView;
+class QPainter;
+
+// 自绘分支区的树视图：
+//   - QSS 一旦接管 QTreeView::branch，Qt 就不再画默认的展开指示器，因此箭头与连接线全部自己画；
+//   - 自绘缩进区的 hover/选中底色，避免只有文字那一截变色（看起来像节点被缩进了一格）；
+//   - 行内容单击即发出 rowClicked，由 FolderTreePane 决定是展开目录还是打开文件。
+class FolderTreeView : public QTreeView {
+    Q_OBJECT
+public:
+    explicit FolderTreeView(QWidget* parent = nullptr);
+
+    // 切换根目录后旧 hover 索引已失效，必须清掉，否则可能给新根里的同号行误上色。
+    void resetHover();
+
+signals:
+    // 单击一行。目录的展开切换已在 mousePressEvent 里完成，这里只用于打开文件。
+    void rowClicked(const QModelIndex& index);
+
+protected:
+    void drawBranches(QPainter* painter, const QRect& rect, const QModelIndex& index) const override;
+    bool viewportEvent(QEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+
+private:
+    // 悬停只重绘旧/新两行；整屏重绘在快速划过目录时会白白重画几十行。
+    QRect fullRowRect(const QModelIndex& index) const;
+    QModelIndex _hovered;
+};
 
 // 轻量图标提供者：目录/文件各用一个 QStyle 标准图标，并按文件后缀缓存。
 // QFileSystemModel 默认的 QFileIconProvider 会对每个条目走 MIME/主题图标查询；
@@ -58,8 +87,10 @@ signals:
     void fileActivated(const QString& absolutePath);
 
 private:
+    void onRowClicked(const QModelIndex& index);
+
     QFileSystemModel* _model{nullptr};
-    QTreeView* _view{nullptr};
+    FolderTreeView* _view{nullptr};
     FolderTreeIconProvider* _icons{nullptr};
     QString _rootPath;
 };

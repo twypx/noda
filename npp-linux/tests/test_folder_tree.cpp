@@ -3,10 +3,15 @@
 #include "utils/ThemeManager.h"
 
 #include <QtTest>
+#include <QApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileSystemModel>
+#include <QHoverEvent>
+#include <QImage>
 #include <QSignalSpy>
+#include <QStyle>
+#include <QStyleOptionViewItem>
 #include <QTemporaryDir>
 #include <QTreeView>
 
@@ -164,4 +169,168 @@ void TestFolderTree::toolbarIconResourcesExist() {
             QVERIFY2(QFile::exists(path), qPrintable(QStringLiteral("缺少工具栏图标 ") + path));
         }
     }
+}
+
+void TestFolderTree::singleClickTogglesFolderExpansion() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QVERIFY(makeDir(dir.filePath("sub")));
+    QVERIFY(touch(dir.filePath("sub/child.txt")));
+
+    FolderTreePane pane;
+    QVERIFY(pane.setRootPath(dir.path()));
+    pane.resize(600, 400);
+    pane.show();
+    QTRY_VERIFY(pane.model()->rowCount(pane.rootIndex()) >= 1);
+
+    const QModelIndex sub = findChildByName(pane.model(), pane.rootIndex(), QStringLiteral("sub"));
+    QVERIFY(sub.isValid());
+    QVERIFY(pane.model()->hasChildren(sub));
+    QVERIFY(!pane.view()->isExpanded(sub));
+
+    const QPoint rowPoint = pane.view()->visualRect(sub).center();
+    // 点在行内容上（不是左侧缩进/箭头区），右侧该展开。
+    QTest::mouseClick(pane.view()->viewport(), Qt::LeftButton, Qt::NoModifier, rowPoint);
+    QTRY_VERIFY2(pane.view()->isExpanded(sub), "单击文件夹行必须展开子节点");
+
+    QTest::mouseClick(pane.view()->viewport(), Qt::LeftButton, Qt::NoModifier, rowPoint);
+    QTRY_VERIFY2(!pane.view()->isExpanded(sub), "再次单击同一文件夹必须收起");
+}
+
+void TestFolderTree::doubleClickTogglesFolderOnlyOnce() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QVERIFY(makeDir(dir.filePath("sub")));
+    QVERIFY(touch(dir.filePath("sub/child.txt")));
+
+    FolderTreePane pane;
+    QVERIFY(pane.setRootPath(dir.path()));
+    pane.resize(600, 400);
+    pane.show();
+    QTRY_VERIFY(pane.model()->rowCount(pane.rootIndex()) >= 1);
+
+    const QModelIndex sub = findChildByName(pane.model(), pane.rootIndex(), QStringLiteral("sub"));
+    QVERIFY(sub.isValid());
+    const QPoint rowPoint = pane.view()->visualRect(sub).center();
+
+    // 真实双击 = 第一次 press/release 切换 + 第二次以 MouseButtonDblClick 到达。
+    // 第二次不能再切换，否则用户看到的是「展开后立刻收起」。
+    QTest::mouseClick(pane.view()->viewport(), Qt::LeftButton, Qt::NoModifier, rowPoint);
+    QVERIFY2(pane.view()->isExpanded(sub), "双击的第一下应先展开");
+    QTest::mouseDClick(pane.view()->viewport(), Qt::LeftButton, Qt::NoModifier, rowPoint);
+    QTRY_VERIFY2(pane.view()->isExpanded(sub), "双击文件夹应保持展开，不能来回抵消");
+}
+
+void TestFolderTree::hoverDoesNotShiftItemContents() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QVERIFY(touch(dir.filePath("note.txt")));
+
+    FolderTreePane pane;
+    QVERIFY(pane.setRootPath(dir.path()));
+    pane.resize(600, 400);
+    pane.setStyleSheet(ThemeManager::getStyleSheet(false));
+    pane.show();
+    QTRY_VERIFY(pane.model()->rowCount(pane.rootIndex()) >= 1);
+
+    const QModelIndex idx = findChildByName(pane.model(), pane.rootIndex(),
+                                           QStringLiteral("note.txt"));
+    QVERIFY(idx.isValid());
+
+    QStyleOptionViewItem opt;
+    opt.initFrom(pane.view());
+    opt.rect = pane.view()->visualRect(idx);
+    opt.state |= QStyle::State_Enabled;
+    const QRect normal = pane.view()->style()->subElementRect(
+        QStyle::SE_ItemViewItemText, &opt, pane.view());
+
+    opt.state |= QStyle::State_MouseOver;
+    const QRect hovered = pane.view()->style()->subElementRect(
+        QStyle::SE_ItemViewItemText, &opt, pane.view());
+
+    QCOMPARE(hovered, normal);
+}
+
+void TestFolderTree::branchAreaDrawsConnectorLines() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QVERIFY(makeDir(dir.filePath("sub")));
+    QVERIFY(touch(dir.filePath("sub/child.txt")));
+
+    FolderTreePane pane;
+    QVERIFY(pane.setRootPath(dir.path()));
+    pane.resize(320, 200);
+    pane.show();
+    QTRY_VERIFY(pane.model()->rowCount(pane.rootIndex()) >= 1);
+
+    const QModelIndex sub = findChildByName(pane.model(), pane.rootIndex(), QStringLiteral("sub"));
+    QVERIFY(sub.isValid());
+    pane.view()->expand(sub);
+    QTRY_VERIFY(pane.model()->rowCount(sub) >= 1);
+
+    const QModelIndex child = pane.model()->index(0, 0, sub);
+    QVERIFY(child.isValid());
+    QTRY_VERIFY(pane.view()->visualRect(child).isValid());
+
+    QImage image(pane.view()->viewport()->size(), QImage::Format_ARGB32);
+    image.fill(Qt::magenta);
+    pane.view()->viewport()->render(&image);
+
+    const QColor background = image.pixelColor(image.width() - 1, image.height() - 1);
+    const QRect row = pane.view()->visualRect(child);
+    const int branchWidth = 2 * pane.view()->indentation();
+
+    auto sameColor = [](const QColor& a, const QColor& b) {
+        return qAbs(a.red() - b.red()) <= 4 && qAbs(a.green() - b.green()) <= 4
+            && qAbs(a.blue() - b.blue()) <= 4;
+    };
+
+    bool ink = false;
+    for (int y = row.top(); y <= row.bottom() && !ink; ++y) {
+        for (int x = 0; x <= branchWidth && x < image.width(); ++x) {
+            if (!sameColor(image.pixelColor(x, y), background)) {
+                ink = true;
+                break;
+            }
+        }
+    }
+    QVERIFY2(ink, "子节点缩进区必须画出连接线");
+}
+
+void TestFolderTree::hoverPaintsFullRowIncludingIndent() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QVERIFY(touch(dir.filePath("note.txt")));
+
+    FolderTreePane pane;
+    QVERIFY(pane.setRootPath(dir.path()));
+    pane.resize(320, 200);
+    pane.setStyleSheet(ThemeManager::getStyleSheet(false));
+    pane.show();
+    QTRY_VERIFY(pane.model()->rowCount(pane.rootIndex()) >= 1);
+
+    const QModelIndex index = findChildByName(pane.model(), pane.rootIndex(),
+                                             QStringLiteral("note.txt"));
+    QVERIFY(index.isValid());
+    const QPoint rowPoint = pane.view()->visualRect(index).center();
+    QHoverEvent hover(QEvent::HoverMove, QPointF(rowPoint), QPointF(rowPoint));
+    QApplication::sendEvent(pane.view()->viewport(), &hover);
+
+    QImage image(pane.view()->viewport()->size(), QImage::Format_ARGB32);
+    image.fill(Qt::magenta);
+    pane.view()->viewport()->render(&image);
+
+    const QColor expected = ThemeManager::folderTreeColors().hover;
+    QCOMPARE(image.pixelColor(2, rowPoint.y()), expected);
+}
+
+void TestFolderTree::dockTitleCloseButtonUsesLucideIcon() {
+    const QString dark = ThemeManager::getStyleSheet(true);
+    const QString light = ThemeManager::getStyleSheet(false);
+
+    // 与标签页关闭按钮使用同一枚 lucide x；平台默认的 X 不再出现。
+    QVERIFY2(dark.contains(QStringLiteral("titlebar-close-icon: url(:/toolbar/dark/x_")),
+             "深色 Dock 标题栏关闭按钮必须使用 lucide x 图标");
+    QVERIFY2(light.contains(QStringLiteral("titlebar-close-icon: url(:/toolbar/light/x_")),
+             "浅色 Dock 标题栏关闭按钮必须使用 lucide x 图标");
 }

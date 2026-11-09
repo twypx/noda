@@ -10,10 +10,15 @@ namespace {
 
 const char* kGroup = "shortcuts";
 
+static const QRegularExpression& bracketRegex() {
+    static const QRegularExpression s_regex(QStringLiteral("\\([^)]*\\)"));
+    return s_regex;
+}
+
 QString cleanMenuTitle(const QString& title) {
     QString t = title;
     t.remove(QLatin1Char('&'));
-    t.remove(QRegularExpression(QStringLiteral("\\([^)]*\\)")));
+    t.remove(bracketRegex());
     return t.trimmed();
 }
 
@@ -42,7 +47,7 @@ ShortcutManager& ShortcutManager::instance() {
 QString ShortcutManager::cleanActionText(const QString& text) {
     QString t = text;
     // "另存为(&A)..." -> "另存为"：先去助记符括号，再去 & 与末尾省略号。
-    t.remove(QRegularExpression(QStringLiteral("\\([^)]*\\)")));
+    t.remove(bracketRegex());
     t.remove(QLatin1Char('&'));
     while (t.endsWith(QLatin1Char('.')) || t.endsWith(QChar(0x2026))) t.chop(1);
     return t.trimmed();

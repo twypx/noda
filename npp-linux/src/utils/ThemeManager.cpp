@@ -5,6 +5,14 @@
 
 namespace {
 
+// 目录树行的 hover / 选中底色：QSS 与自绘缩进区共用，改一处即可。
+constexpr const char* kTreeHoverDark = "#333333";
+constexpr const char* kTreeHoverLight = "#f0edf8";
+constexpr const char* kTreeSelectedDark = "#3d3550";
+constexpr const char* kTreeSelectedLight = "#ddd3f5";
+
+bool s_darkTheme = false;
+
 // QSS 的 image: 只认固定像素的 PNG，没有 DPR 概念。标签关闭按钮原来直接写死 x_16.png，
 // 2x 屏上它被按逻辑 16px（= 物理 32px）绘制，等于把 16px 原图拉大一倍，看着就是糊的；
 // 工具栏里同一枚 x 走的是 toolBarIcon() 的 QIcon + setDevicePixelRatio(2)，一直清晰，
@@ -22,12 +30,35 @@ QString closeButtonImage(bool isDark) {
         "                height: 16px;").arg(dir);
 }
 
-// 样式表里带 DPR 的占位符在这里落地。必须在拿到 isDark 之后、setStyleSheet 之前做。
+// Dock 标题栏的关闭按钮同样用 lucide x。titlebar-close-icon 只接受 url()，
+// 这里按屏幕 DPR 选 16/32 源图，2x 屏才不会发糊。
+QString dockCloseIcon(bool isDark) {
+    const QString dir = isDark ? QStringLiteral("dark") : QStringLiteral("light");
+    const qreal dpr = qApp ? qApp->devicePixelRatio() : 1.0;
+    const QString file = dpr <= 1.01 ? QStringLiteral("x_16.png") : QStringLiteral("x_32.png");
+    return QStringLiteral("url(:/toolbar/%1/%2)").arg(dir, file);
+}
+
+// 样式表里带 DPR / 主题色的占位符在这里落地。必须在拿到 isDark 之后、setStyleSheet 之前做。
 QString finishStyleSheet(const QString& css, bool isDark) {
-    return QString(css).replace(QStringLiteral("@CLOSE_BUTTON_IMAGE@"), closeButtonImage(isDark));
+    QString out = css;
+    out.replace(QStringLiteral("@CLOSE_BUTTON_IMAGE@"), closeButtonImage(isDark));
+    out.replace(QStringLiteral("@DOCK_CLOSE_ICON@"), dockCloseIcon(isDark));
+    out.replace(QStringLiteral("@TREE_HOVER_COLOR@"),
+                QLatin1String(isDark ? kTreeHoverDark : kTreeHoverLight));
+    out.replace(QStringLiteral("@TREE_SELECTED_COLOR@"),
+                QLatin1String(isDark ? kTreeSelectedDark : kTreeSelectedLight));
+    return out;
 }
 
 }   // namespace
+
+FolderTreeColors ThemeManager::folderTreeColors() {
+    // drawBranches 每行都会取一次颜色；静态构造，避免逐行解析颜色字符串。
+    static const FolderTreeColors dark{QColor(kTreeHoverDark), QColor(kTreeSelectedDark)};
+    static const FolderTreeColors light{QColor(kTreeHoverLight), QColor(kTreeSelectedLight)};
+    return s_darkTheme ? dark : light;
+}
 
 QString ThemeManager::getStyleSheet(bool isDark) {
     if (isDark) {
@@ -225,6 +256,8 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 background-color: #282828;
                 color: #d4d4d4;
                 border: 0px;
+                /* 与标签页关闭按钮同一枚 lucide x，不再回退到平台默认的灰色 X。 */
+                titlebar-close-icon: @DOCK_CLOSE_ICON@;
             }
             QDockWidget::title {
                 background-color: #2f2f2f;
@@ -240,15 +273,25 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 outline: 0;
                 show-decoration-selected: 1;
             }
+            /* 三种状态的 padding/margin/border 必须完全一致：只要 hover 态少写一项，
+               Qt 就会按另一套内容矩形绘制，鼠标移上去文字会横向抖一下。 */
             QTreeView::item {
                 padding: 2px 4px;
+                margin: 0px;
+                border: 0px;
                 min-height: 20px;
             }
             QTreeView::item:hover {
-                background-color: #333333;
+                padding: 2px 4px;
+                margin: 0px;
+                border: 0px;
+                background-color: @TREE_HOVER_COLOR@;
             }
             QTreeView::item:selected {
-                background-color: #3d3550;
+                padding: 2px 4px;
+                margin: 0px;
+                border: 0px;
+                background-color: @TREE_SELECTED_COLOR@;
                 color: #ffffff;
             }
             QTreeView::branch {
@@ -528,6 +571,8 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 background-color: #f6f6f6;
                 color: #333333;
                 border: 0px;
+                /* 与标签页关闭按钮同一枚 lucide x，不再回退到平台默认的灰色 X。 */
+                titlebar-close-icon: @DOCK_CLOSE_ICON@;
             }
             QDockWidget::title {
                 background-color: #eeeeee;
@@ -543,15 +588,25 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 outline: 0;
                 show-decoration-selected: 1;
             }
+            /* 三种状态的 padding/margin/border 必须完全一致：只要 hover 态少写一项，
+               Qt 就会按另一套内容矩形绘制，鼠标移上去文字会横向抖一下。 */
             QTreeView::item {
                 padding: 2px 4px;
+                margin: 0px;
+                border: 0px;
                 min-height: 20px;
             }
             QTreeView::item:hover {
-                background-color: #f0edf8;
+                padding: 2px 4px;
+                margin: 0px;
+                border: 0px;
+                background-color: @TREE_HOVER_COLOR@;
             }
             QTreeView::item:selected {
-                background-color: #ddd3f5;
+                padding: 2px 4px;
+                margin: 0px;
+                border: 0px;
+                background-color: @TREE_SELECTED_COLOR@;
                 color: #1f1f1f;
             }
             QTreeView::branch {
@@ -643,6 +698,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
 }
 
 void ThemeManager::applyTheme(bool isDark) {
+    s_darkTheme = isDark;
     QApplication::setStyle(QStyleFactory::create("Fusion"));
 
     QPalette p;

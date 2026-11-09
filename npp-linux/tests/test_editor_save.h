@@ -13,4 +13,12 @@ private slots:
     void saveCopyWritesTargetEncodingAndKeepsState();
     void saveCopyRespectsBom();
     void saveCopyFailureWritesNothing();
+    // 载入文件不应创建撤销动作，载入后 Undo 不能清空文件
+    void loadFromFileDoesNotCreateUndoStep();
+    // 虚拟空格批量对齐
+    void columnInsertVirtualSpacesBlock();
+    // 行排序在不同换行符下一致并具备撤销事务
+    void sortLinesSupportsCrAndUndo();
+    // 行号边距宽度按位数缓存，避免高频字符/行变动时重复字体度量
+    void lineNumberMarginWidthDigitsCaching();
 };

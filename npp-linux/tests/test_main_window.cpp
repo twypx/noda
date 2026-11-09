@@ -59,3 +59,38 @@ void TestMainWindow::saveFailureNotifiesUserAndKeepsFile() {
     QCOMPARE(readAll(path), QByteArray("ORIGINAL"));
     QVERIFY(ed->send(SCI_GETMODIFY) != 0);
 }
+
+void TestMainWindow::backupOnlyWhenDirty() {
+    MainWindow window;
+    auto* tabs = window.findChild<TabManager*>();
+    QVERIFY(tabs);
+    auto* ed = tabs->currentEditor();
+    QVERIFY(ed);
+
+    const char text1[] = "Hello Backup";
+    ed->send(SCI_APPENDTEXT, static_cast<uptr_t>(sizeof(text1) - 1), reinterpret_cast<sptr_t>(text1));
+    QVERIFY(ed->buffer()->isModified());
+
+    window.syncBackups();
+    const QString backupPath = QString::fromStdString(ed->buffer()->getBackupFileName());
+    QVERIFY(!backupPath.isEmpty());
+    QVERIFY(QFile::exists(backupPath));
+    QCOMPARE(readAll(backupPath), QByteArray(text1));
+
+    const QDateTime firstModified = QFileInfo(backupPath).lastModified();
+    QTest::qWait(50);
+
+    window.syncBackups();
+    const QDateTime secondModified = QFileInfo(backupPath).lastModified();
+    QCOMPARE(secondModified, firstModified);
+
+    const char text2[] = " More";
+    ed->send(SCI_APPENDTEXT, static_cast<uptr_t>(sizeof(text2) - 1), reinterpret_cast<sptr_t>(text2));
+    QTest::qWait(50);
+
+    window.syncBackups();
+    QCOMPARE(readAll(backupPath), QByteArray("Hello Backup More"));
+    const QDateTime thirdModified = QFileInfo(backupPath).lastModified();
+    QVERIFY(thirdModified >= secondModified);
+}
+

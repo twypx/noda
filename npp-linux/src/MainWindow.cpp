@@ -1949,6 +1949,7 @@ void MainWindow::syncBackups() {
             if (!existing.isEmpty()) {
                 SessionManager::removeBackupFile(existing);
                 buf->setBackupFileName(std::string());
+                buf->setBackupDirty(false);
                 sessionChanged = true;
             }
             continue;
@@ -1959,6 +1960,11 @@ void MainWindow::syncBackups() {
             continue;
         }
 
+        // 增量检查：自上次备份后若内容未发生新的改动，且备份文件已在盘上，跳过无谓重写
+        if (!buf->isBackupDirty() && !existing.isEmpty() && QFile::exists(existing)) {
+            continue;
+        }
+
         QString target = existing;
         if (target.isEmpty()) {
             target = SessionManager::newBackupPath(QString::fromStdString(buf->getFileName()));
@@ -1966,7 +1972,9 @@ void MainWindow::syncBackups() {
             buf->setBackupFileName(target.toStdString());
             sessionChanged = true;
         }
-        SessionManager::writeBackup(target, QString::fromStdString(ed->currentTextUtf8()));
+        if (SessionManager::writeBackup(target, ed->currentTextUtf8())) {
+            buf->setBackupDirty(false);
+        }
     }
 
     // 新的 backupFilePath 必须马上写进 session.xml：否则程序被强杀时 session 里没有这条
@@ -1981,6 +1989,7 @@ void MainWindow::dropBackup(EditorView* ed) {
     if (path.empty()) return;
     SessionManager::removeBackupFile(QString::fromStdString(path));
     buf->setBackupFileName(std::string());
+    buf->setBackupDirty(false);
 }
 
 void MainWindow::restartBackupTimer() {

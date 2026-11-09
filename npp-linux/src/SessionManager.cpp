@@ -112,12 +112,11 @@ QString SessionManager::newBackupPath(const QString& displayName) {
     return dir.filePath(base + QLatin1Char('@') + stamp);
 }
 
-bool SessionManager::writeBackup(const QString& path, const QString& utf8) {
+bool SessionManager::writeBackup(const QString& path, std::string_view utf8) {
     if (path.isEmpty()) return false;
     QSaveFile f(path);
     if (!f.open(QIODevice::WriteOnly)) return false;
-    const QByteArray bytes = utf8.toUtf8();
-    if (f.write(bytes) != bytes.size()) {
+    if (f.write(utf8.data(), static_cast<qint64>(utf8.size())) != static_cast<qint64>(utf8.size())) {
         f.cancelWriting();
         return false;
     }

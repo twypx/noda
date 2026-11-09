@@ -164,7 +164,8 @@ public:
     void setShowEOL(bool show);
     void setShowIndentGuides(bool show);
     void setShowLineNumbers(bool show);
-    void updateLineNumberMarginWidth();
+    void updateLineNumberMarginWidth(bool force = false);
+    int lineNumberMarginDigits() const { return _lastLineDigits; }
     void updateEditorChromeStyles();
     void setWrapMode(bool wrap);
     void zoomIn() { send(SCI_ZOOMIN); }
@@ -226,6 +227,7 @@ private:
     bool _isDarkMode{false};
     bool _showLineNumbers{true};
     int _lastLineCount{-1};
+    int _lastLineDigits{-1};
     std::string _currentLang{"normal"};
     QString _fontName{"Monospace"};
     int _fontSize{10};

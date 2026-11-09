@@ -34,6 +34,10 @@ public:
     bool isModified() const { return _isModified; }
     void setModified(bool modified) { _isModified = modified; }
 
+    // 增量备份标记：内容发生变动时置 true，落盘备份后置 false，避免无改动时频繁刷盘
+    bool isBackupDirty() const { return _backupDirty; }
+    void setBackupDirty(bool dirty) { _backupDirty = dirty; }
+
     // 会话快照的备份文件名：非空表示当前缓冲区有未保存内容已落盘到 backup/ 下
     // （对应上游 Buffer::_backupFileName）。它只在第一次变脏时生成，之后保持不变。
     const std::string& getBackupFileName() const { return _backupFileName; }
@@ -65,6 +69,7 @@ private:
     std::string _encoding{"UTF-8"};
     LineEnding _lineEnding{LineEnding::LF};
     bool _isModified{false};
+    bool _backupDirty{false};
     bool _isBinary{false};
     int _newDocIndex{1};
 };
