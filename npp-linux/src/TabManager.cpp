@@ -1,4 +1,6 @@
 #include "TabManager.h"
+#include <QContextMenuEvent>
+#include <QEvent>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QTabBar>
@@ -10,6 +12,37 @@ TabManager::TabManager(QWidget* parent) : QTabWidget(parent) {
 
     connect(this, &QTabWidget::tabCloseRequested, this, &TabManager::onTabCloseRequested);
     connect(this, &QTabWidget::currentChanged, this, &TabManager::onCurrentChanged);
+
+    // 右键菜单由 TabManager 识别命中（它知道 tabAt），但菜单内容与文件操作归 MainWindow，
+    // 因此这里只负责「选中 + 转发坐标」。
+    tabBar()->installEventFilter(this);
+}
+
+bool TabManager::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == tabBar() && event->type() == QEvent::ContextMenu) {
+        auto* ce = static_cast<QContextMenuEvent*>(event);
+        int index = tabBar()->tabAt(tabBar()->mapFromGlobal(ce->globalPos()));
+        QPoint globalPos = ce->globalPos();
+
+        // 键盘（菜单键 / Shift+F10）没有鼠标坐标，回退到当前标签的中心。
+        if (index < 0 && ce->reason() == QContextMenuEvent::Keyboard) {
+            index = currentIndex();
+            if (index >= 0) globalPos = tabBar()->mapToGlobal(tabBar()->tabRect(index).center());
+        }
+
+        // 上游 TabBar::runProc 的 WM_RBUTTONDOWN：命中标签才改变选中项；
+        // 空白条带（tabAt == -1）既不选中也不弹菜单。
+        if (index < 0) {
+            event->accept();
+            return true;
+        }
+
+        if (index != currentIndex()) setCurrentIndex(index);
+        emit tabContextMenuRequested(index, globalPos);
+        event->accept();
+        return true;
+    }
+    return QTabWidget::eventFilter(watched, event);
 }
 
 void TabManager::mouseDoubleClickEvent(QMouseEvent* event) {

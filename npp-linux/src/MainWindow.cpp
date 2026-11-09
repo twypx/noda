@@ -12,7 +12,9 @@
 #include <QMenu>
 #include <QToolBar>
 #include <QStatusBar>
+#include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QMessageBox>
 #include <QCloseEvent>
 #include <QDragEnterEvent>
@@ -160,6 +162,9 @@ MainWindow::MainWindow(QWidget* parent)
     // 双击标签栏空白处新建文档（上游 Notepad++ 的同一手势）。走 onNewFile 而不是直接
     // createNewTab()，新建的文档才会带上首选项里的默认 EOL / 编码。
     connect(_tabManager, &TabManager::blankAreaActivated, this, &MainWindow::onNewFile);
+    // 标签右键：TabManager 已经选中被点的标签，这里只负责弹出对应菜单。
+    connect(_tabManager, &TabManager::tabContextMenuRequested,
+            this, &MainWindow::showTabContextMenu);
     connect(_fileWatcher, &QFileSystemWatcher::fileChanged, this, &MainWindow::onFileChangedOnDisk);
 
     _backupTimer = new QTimer(this);
@@ -990,6 +995,141 @@ void MainWindow::onRenameFile() {
             QMessageBox::warning(this, "错误", "无法重命名该文件。");
         }
     }
+}
+
+void MainWindow::showTabContextMenu(int index, const QPoint& globalPos) {
+    std::unique_ptr<QMenu> menu(createTabContextMenu(index));
+    if (!menu) return;
+    menu->exec(globalPos);
+}
+
+QMenu* MainWindow::createTabContextMenu(int index) {
+    auto* menu = new QMenu(this);
+    // 运行期新建的菜单不在构造时那趟 WA_TranslucentBackground 遍历里；不单独设置的话，
+    // QSS 圆角之外的窗口角落会露出方形底色。
+    menu->setAttribute(Qt::WA_TranslucentBackground);
+
+    EditorView* ed = _tabManager->editorAt(index);
+    if (!ed) return menu;
+
+    const QString path = QString::fromStdString(ed->buffer()->getFilePath());
+    const bool hasPath = !path.isEmpty();
+    const int count = _tabManager->count();
+
+    // 菜单构建与触发之间当前标签可能已经变化（测试也会直接按 index 构建），
+    // 因此每个动作都先定位到被右击的标签，再复用既有处理函数。
+    auto selectTab = [this, index]() {
+        if (index >= 0 && index < _tabManager->count()) _tabManager->setCurrentIndex(index);
+    };
+    auto invoke = [this, selectTab](void (MainWindow::*slot)()) {
+        return [this, selectTab, slot]() {
+            selectTab();
+            (this->*slot)();
+        };
+    };
+
+    // 关闭：按 index 直接关，不依赖 currentIndex。
+    menu->addAction(QStringLiteral("关闭"), this, [this, index]() {
+        if (index >= 0 && index < _tabManager->count()) _tabManager->closeTab(index);
+    });
+
+    auto* closeMany = menu->addMenu(QStringLiteral("关闭多个标签页"));
+    closeMany->addAction(QStringLiteral("关闭其他标签页"), this, [this, selectTab]() {
+        selectTab();
+        _tabManager->closeAllExceptCurrent();
+    });
+    closeMany->addAction(QStringLiteral("关闭左侧标签页"), this, [this, selectTab]() {
+        selectTab();
+        _tabManager->closeAllToLeft();
+    });
+    closeMany->addAction(QStringLiteral("关闭右侧标签页"), this, [this, selectTab]() {
+        selectTab();
+        _tabManager->closeAllToRight();
+    });
+    closeMany->addAction(QStringLiteral("关闭所有未修改的标签页"), this, [this, selectTab]() {
+        selectTab();
+        _tabManager->closeAllUnchanged();
+    });
+
+    menu->addAction(QStringLiteral("保存"), this, invoke(&MainWindow::onSaveFile));
+    menu->addAction(QStringLiteral("另存为..."), this, invoke(&MainWindow::onSaveAsFile));
+
+    // 上游的 Open into 组：Linux 下对应文件管理器、终端与默认程序。
+    auto* openInto = menu->addMenu(QStringLiteral("打开所在文件夹"));
+    auto* inFileManager = openInto->addAction(QStringLiteral("在文件管理器中打开"), this,
+                                              invoke(&MainWindow::onOpenFolderInFileManager));
+    auto* inTerminal = openInto->addAction(QStringLiteral("在终端中打开"), this,
+                                           invoke(&MainWindow::onOpenFolderInTerminal));
+    openInto->addSeparator();
+    auto* inDefaultApp = openInto->addAction(QStringLiteral("用默认程序打开"), this,
+        [path]() { QDesktopServices::openUrl(QUrl::fromLocalFile(path)); });
+    inFileManager->setEnabled(hasPath);
+    inTerminal->setEnabled(hasPath);
+    inDefaultApp->setEnabled(hasPath);
+
+    menu->addAction(QStringLiteral("重命名..."), this,
+                    invoke(&MainWindow::onRenameFile))->setEnabled(hasPath);
+    menu->addAction(QStringLiteral("移到回收站"), this,
+                    invoke(&MainWindow::onMoveToTrashFile))->setEnabled(hasPath);
+    menu->addAction(QStringLiteral("从磁盘重新载入"), this,
+                    invoke(&MainWindow::onReloadFile))->setEnabled(hasPath);
+    menu->addAction(QStringLiteral("打印..."), this, invoke(&MainWindow::onPrint));
+
+    menu->addSeparator();
+    QAction* readOnly = menu->addAction(QStringLiteral("只读"));
+    readOnly->setCheckable(true);
+    readOnly->setChecked(ed->isReadOnly());
+    connect(readOnly, &QAction::triggered, this, [this, selectTab](bool on) {
+        selectTab();
+        onToggleReadOnly(on);
+    });
+
+    menu->addSeparator();
+    auto* copyMenu = menu->addMenu(QStringLiteral("复制到剪贴板"));
+    copyMenu->addAction(QStringLiteral("复制完整路径"), this,
+                        invoke(&MainWindow::onCopyFilePath))->setEnabled(hasPath);
+    // 新文档也有名字（new 1），所以「复制文件名」不需要磁盘路径。
+    copyMenu->addAction(QStringLiteral("复制文件名"), this, invoke(&MainWindow::onCopyFileName));
+    copyMenu->addAction(QStringLiteral("复制目录路径"), this,
+                        invoke(&MainWindow::onCopyDir))->setEnabled(hasPath);
+
+    // 上游 Move Document 的 Start/End；双视图与新实例本程序没有，不列出。
+    auto* moveMenu = menu->addMenu(QStringLiteral("移动标签页"));
+    moveMenu->addAction(QStringLiteral("移到最前"), this, [this, index]() {
+        if (index >= 0 && index < _tabManager->count()) {
+            _tabManager->setCurrentIndex(index);
+            _tabManager->moveTabFirst();
+        }
+    })->setEnabled(index > 0);
+    moveMenu->addAction(QStringLiteral("移到最后"), this, [this, index, count]() {
+        if (index >= 0 && index < _tabManager->count()) {
+            _tabManager->setCurrentIndex(index);
+            _tabManager->moveTabLast();
+        }
+    })->setEnabled(index < count - 1);
+
+    return menu;
+}
+
+void MainWindow::onMoveToTrashFile() {
+    auto* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    const QString path = QString::fromStdString(ed->buffer()->getFilePath());
+    if (path.isEmpty()) return;
+
+    auto reply = QMessageBox::question(this, QStringLiteral("移到回收站"),
+        QStringLiteral("确定要把 %1 移到回收站吗？").arg(path),
+        QMessageBox::Yes | QMessageBox::No);
+    if (reply != QMessageBox::Yes) return;
+
+    QString error;
+    if (!QFile::moveToTrash(path, &error)) {
+        QMessageBox::warning(this, QStringLiteral("移到回收站失败"),
+                             error.isEmpty() ? QStringLiteral("无法移动该文件。") : error);
+        return;
+    }
+    _fileWatcher->removePath(path);
+    _tabManager->closeTab(_tabManager->currentIndex());
 }
 
 void MainWindow::onDeleteFileFromDisk() {

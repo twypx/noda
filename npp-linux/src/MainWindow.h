@@ -28,6 +28,7 @@
 
 class QToolBar;
 class QTimer;
+class QMenu;
 class QDragEnterEvent;
 class QDragMoveEvent;
 class QDropEvent;
@@ -52,6 +53,10 @@ public:
     // 设置左侧目录树的根并显示它；从 onOpenFolder() 与回归测试共用同一入口，
     // 测试因此可以绕开 QFileDialog 的模态对话框。失败返回 false。
     bool openFolderPath(const QString& path);
+
+    // 按 index 构造标签右键菜单但不弹出。正常路径由 showTabContextMenu() 调用，
+    // 回归测试直接检查菜单结构与启用/勾选状态。调用方负责 delete。
+    QMenu* createTabContextMenu(int index);
 
 signals:
     // 保存/拷贝另存为失败：path 是目标路径，reason 是 EditorView::lastSaveError() 的具体原因。
@@ -79,6 +84,8 @@ private slots:
     void onSaveAllFiles();
     void onRenameFile();
     void onDeleteFileFromDisk();
+    // 标签右键菜单的「移到回收站」：可恢复删除，对应上游 Move to Recycle Bin。
+    void onMoveToTrashFile();
     void onCloseFile();
     void onCloseAllFiles();
     void onCloseAllExceptCurrent();
@@ -206,6 +213,9 @@ private slots:
     void onFileChangedOnDisk(const QString& path);
 
 private:
+    // 标签右键菜单的弹出入口；菜单项全部通过 createTabContextMenu() 构建。
+    void showTabContextMenu(int index, const QPoint& globalPos);
+
     // 保存失败统一处理：发信号 + 带具体原因的提示，绝不假装成功。
     void reportSaveFailure(const QString& path, EditorView* ed);
 

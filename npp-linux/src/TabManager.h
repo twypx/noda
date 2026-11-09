@@ -47,10 +47,15 @@ signals:
     // 双击标签栏空白处（复刻上游 Notepad++ 的同一手势）。真正新建文档由 MainWindow 做，
     // 这样才能带上首选项里的默认 EOL / 编码。
     void blankAreaActivated();
+    // 右键点击某个标签：该标签已经被选中（同上游 WM_RBUTTONDOWN），globalPos 用于弹出菜单。
+    // 标签栏空白处不触发，也不改变当前标签。
+    void tabContextMenuRequested(int index, const QPoint& globalPos);
 
 protected:
     // 双击标签栏右侧的空白区（标签栏只占标签那一段宽度，右边空白落在 QTabWidget 上）。
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    // 拦截标签栏的 QEvent::ContextMenu：右键先选中被点的标签，再请求弹出菜单。
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private slots:
     void onTabCloseRequested(int index);
