@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 #include "StyleManager.h"
 #include "utils/StartupNotify.h"
+#include "utils/SingleInstance.h"
 #include <QDir>
 #include <QIcon>
 #include <QMessageBox>
@@ -12,6 +13,26 @@ int main(int argc, char* argv[]) {
     // 抢在 QApplication 之前把 DESKTOP_STARTUP_ID 读走：Qt 的 xcb 平台层
     // 会在构造时消费它（只写到自己那个隐藏 leader 窗口上），事后再读已是空串。
     StartupNotify::captureStartupId();
+
+    // 收集命令行参数与文件路径（在初始化繁重资源前快速提取）
+    bool multiInst = false;
+    QStringList filePaths;
+    for (int i = 1; i < argc; ++i) {
+        QString arg = QString::fromLocal8Bit(argv[i]);
+        if (arg == QStringLiteral("-multiInst") || arg == QStringLiteral("--multi-instance")) {
+            multiInst = true;
+        } else if (!arg.startsWith('-')) {
+            QFileInfo fi(arg);
+            filePaths.append(fi.absoluteFilePath());
+        }
+    }
+
+    // 单实例快速通道：若已有实例在运行，直接把文件列表传递过去，本进程秒级退出。
+    // 彻底消除右键打开文件时启动新进程导致的资源浪费与文件管理器投影缩影延迟。
+    if (!multiInst && SingleInstance::trySendFilesToRunningInstance(filePaths)) {
+        StartupNotify::notifyComplete();
+        return 0;
+    }
 
     // 强制禁用平台全局菜单，确保菜单栏稳定显示在主窗口内部 (防止 GNOME/Wayland 下菜单栏消失)
     QApplication::setAttribute(Qt::AA_DontUseNativeMenuBar);
@@ -55,23 +76,27 @@ int main(int argc, char* argv[]) {
     }
 
     MainWindow window;
+
+    // 单实例监听：作为主实例接收后续启动进程转交的文件打开请求
+    SingleInstance singleInstance;
+    if (!multiInst) {
+        singleInstance.listen();
+        QObject::connect(&singleInstance, &SingleInstance::openFilesRequested,
+                         &window, &MainWindow::openFilesFromIpc);
+    }
+
+    // 启动前先载入命令行传入的文件，避免先画空白窗口再载入导致的闪烁与投影撕裂
+    for (const QString& path : filePaths) {
+        if (QFile::exists(path)) {
+            window.openFile(path);
+        }
+    }
+
     // X11 下必须赶在映射前把 _NET_STARTUP_ID 写到主窗口上（Qt 自己只写在了它的 SM leader 隐藏窗口上）。
     StartupNotify::announceBeforeShow(&window);
     window.show();
-    // 映射后主动告诉启动器“这次启动好了”。不发这一步，任务栏/应用列表那里建的启动序列
-    // 一直没人接，转圈要等到 15 秒超时才停（实测），而且转圈期间再点图标也开不了。
+    // 映射后主动告诉启动器“这次启动好了”。
     StartupNotify::notifyComplete();
-
-    // 如果命令行传入了文件路径，自动打开
-    QStringList args = app.arguments();
-    for (int i = 1; i < args.size(); ++i) {
-        if (!args[i].startsWith("-")) {
-            QFileInfo fi(args[i]);
-            if (fi.exists()) {
-                window.openFile(fi.absoluteFilePath());
-            }
-        }
-    }
 
     return app.exec();
 }

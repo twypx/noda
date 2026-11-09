@@ -3,6 +3,7 @@
 #include <QEvent>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QPushButton>
 #include <QTabBar>
 
 TabManager::TabManager(QWidget* parent) : QTabWidget(parent) {
@@ -151,13 +152,18 @@ bool TabManager::closeTab(int index) {
     if (ed->buffer()->isModified()) {
         QString msg = QString("是否保存对文件 %1 的更改？")
                           .arg(QString::fromStdString(ed->buffer()->getFileName()));
-        auto reply = QMessageBox::question(this, "保存", msg,
-                                            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
-        if (reply == QMessageBox::Save) {
+        QMessageBox box(QMessageBox::Question, QStringLiteral("保存"), msg, QMessageBox::NoButton, this);
+        auto* btnYes = box.addButton(QStringLiteral("是(&Y)"), QMessageBox::YesRole);
+        box.addButton(QStringLiteral("否(&N)"), QMessageBox::NoRole);
+        auto* btnCancel = box.addButton(QStringLiteral("取消(&C)"), QMessageBox::RejectRole);
+        box.setDefaultButton(btnYes);
+        box.setEscapeButton(btnCancel);
+        box.exec();
+        if (box.clickedButton() == btnYes) {
             if (!ed->saveToFile()) {
                 return false;
             }
-        } else if (reply == QMessageBox::Cancel) {
+        } else if (box.clickedButton() == btnCancel || box.clickedButton() == nullptr) {
             return false;
         }
     }

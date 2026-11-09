@@ -54,6 +54,9 @@ public:
     // 测试因此可以绕开 QFileDialog 的模态对话框。失败返回 false。
     bool openFolderPath(const QString& path);
 
+    // 处理来自 IPC（其他进程尝试打开文件）的文件列表，在原有标签管理器中打开并激活窗口
+    void openFilesFromIpc(const QStringList& files);
+
     // 按 index 构造标签右键菜单但不弹出。正常路径由 showTabContextMenu() 调用，
     // 回归测试直接检查菜单结构与启用/勾选状态。调用方负责 delete。
     QMenu* createTabContextMenu(int index);
@@ -207,6 +210,9 @@ private slots:
     void onStyleConfigurator();
     void onShortcutsMapper();
 
+    // 帮助菜单
+    void onAbout();
+
     // 内部事件
     void onActiveEditorChanged(EditorView* editor);
     void onCursorChanged(int line, int col);
@@ -229,6 +235,7 @@ private:
     void setupEncodingMenu();
     void setupLanguageMenu();
     void setupSettingsMenu();
+    void setupHelpMenu();
     void setupToolBar();
     void setupStatusBar();
 
@@ -307,6 +314,7 @@ private:
     QAction* _actAlwaysOnTop{nullptr};
     QAction* _actReadOnly{nullptr};
     QAction* _actDarkMode{nullptr};
+    QAction* _actAbout{nullptr};
 
     // 状态栏控件
     QLabel* _statusPosLabel{nullptr};

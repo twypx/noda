@@ -40,6 +40,8 @@
 #include "utils/CodeFormatter.h"
 #include "dialogs/StyleOverride.h"
 #include "dialogs/ShortcutManager.h"
+#include "dialogs/AboutDlg.h"
+#include "utils/SingleInstance.h"
 
 namespace {
 // 写盘期间临时解除对该路径的 inotify 监视，析构后恢复，避免自身保存触发“外部修改”假警报。
@@ -200,6 +202,7 @@ void MainWindow::setupMenus() {
     setupEncodingMenu();
     setupLanguageMenu();
     setupSettingsMenu();
+    setupHelpMenu();
 
     // QMenu 的弹出窗口是一个矩形的原生窗口，而样式表里的 border-radius 只能决定 Qt 在窗口内
     // 怎么画：圆角之外、矩形角落之内的几像素仍会被窗口底色填实，看上去就像圆角菜单外面
@@ -598,6 +601,18 @@ void MainWindow::setupSettingsMenu() {
     menu->addAction("快捷键映射器(&K)...", this, &MainWindow::onShortcutsMapper);
 }
 
+void MainWindow::setupHelpMenu() {
+    auto* menu = menuBar()->addMenu("帮助(&H)");
+    _actAbout = menu->addAction(toolBarIcon(QStringLiteral("info"), _prefs.darkMode),
+                                "关于 Notepad++(&A)...", this, &MainWindow::onAbout);
+    _actAbout->setShortcut(QKeySequence(Qt::Key_F1));
+}
+
+void MainWindow::onAbout() {
+    AboutDlg dlg(this);
+    dlg.exec();
+}
+
 void MainWindow::setupToolBar() {
     _toolBar = addToolBar("主工具栏");
     _toolBar->setMovable(false);
@@ -676,6 +691,9 @@ void MainWindow::refreshToolBarIcons() {
         QIcon ic = toolBarIcon(pair.second, _prefs.darkMode);
         if (!ic.isNull()) anyIcon = true;
         pair.first->setIcon(ic);
+    }
+    if (_actAbout) {
+        _actAbout->setIcon(toolBarIcon(QStringLiteral("info"), _prefs.darkMode));
     }
     // 资源缺失（未跑生成脚本的旧构建目录）时退回纯文字，不能让工具栏变成一排空按钮。
     if (_toolBar) {
@@ -829,6 +847,15 @@ bool MainWindow::openFolderPath(const QString& path) {
     if (_actFolderTree && !_actFolderTree->isChecked())
         _actFolderTree->setChecked(true);
     return true;
+}
+
+void MainWindow::openFilesFromIpc(const QStringList& files) {
+    for (const QString& f : files) {
+        if (!f.isEmpty() && QFile::exists(f)) {
+            openFile(f);
+        }
+    }
+    SingleInstance::activateWindow(this);
 }
 
 void MainWindow::onOpenFolderInFileManager() {

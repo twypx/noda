@@ -3,6 +3,8 @@ project(NotepadPlusPlus_Linux
     VERSION 1.0.9
     LANGUAGES CXX C)
 
+add_compile_definitions(NPP_VERSION_STRING="${PROJECT_VERSION}")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -14,8 +16,8 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -mtune=generic -flto=auto -DNDEBUG")
 # GCC/Clang 兼容性：确保 <cstdint> 等基础类型头文件在编译时可见
 add_compile_options(-include cstdint)
 
-# 寻找 Qt6 (优先) 或 Qt5；PrintSupport 供“文件 > 打印”使用
-find_package(Qt6 COMPONENTS Core Gui Widgets PrintSupport Concurrent)
+# 寻找 Qt6 (优先) 或 Qt5；PrintSupport 供“文件 > 打印”使用，Network 供单实例进程间通信使用
+find_package(Qt6 COMPONENTS Core Gui Widgets PrintSupport Concurrent Network)
 if (Qt6_FOUND)
     if (NOT TARGET Qt6::PrintSupport)
         message(FATAL_ERROR
@@ -23,14 +25,14 @@ if (Qt6_FOUND)
             "请安装: sudo apt install qt6-base-dev（或对应发行版的 qt6-printsupport 开发包）。")
     endif()
     message(STATUS "Found Qt6: version ${Qt6_VERSION}")
-    set(QT_TARGETS Qt6::Core Qt6::Gui Qt6::Widgets Qt6::PrintSupport Qt6::Concurrent)
+    set(QT_TARGETS Qt6::Core Qt6::Gui Qt6::Widgets Qt6::PrintSupport Qt6::Concurrent Qt6::Network)
     set(CMAKE_AUTOMOC ON)
     set(CMAKE_AUTORCC ON)
     set(CMAKE_AUTOUIC ON)
 else()
-    find_package(Qt5 COMPONENTS Core Gui Widgets PrintSupport Concurrent REQUIRED)
+    find_package(Qt5 COMPONENTS Core Gui Widgets PrintSupport Concurrent Network REQUIRED)
     message(STATUS "Found Qt5: version ${Qt5_VERSION}")
-    set(QT_TARGETS Qt5::Core Qt5::Gui Qt5::Widgets Qt5::PrintSupport Qt5::Concurrent)
+    set(QT_TARGETS Qt5::Core Qt5::Gui Qt5::Widgets Qt5::PrintSupport Qt5::Concurrent Qt5::Network)
     set(CMAKE_AUTOMOC ON)
     set(CMAKE_AUTORCC ON)
     set(CMAKE_AUTOUIC ON)
@@ -152,6 +154,7 @@ set(APP_SOURCES
     src/dialogs/GoToLineDialog.cpp
     src/dialogs/ColumnEditorDialog.cpp
     src/dialogs/DocSummaryDialog.cpp
+    src/dialogs/AboutDlg.cpp
     src/dialogs/PreferencesDialog.cpp
     src/dialogs/ShortcutsDialog.cpp
     src/dialogs/ShortcutManager.cpp
@@ -163,6 +166,7 @@ set(APP_SOURCES
     src/utils/CodeFormatter.cpp
     src/utils/JsonFormatter.cpp
     src/utils/StartupNotify.cpp
+    src/utils/SingleInstance.cpp
 )
 
 # 主程序与回归测试复用同一批应用对象文件：抽成 OBJECT 库，避免把 22 个 .cpp 编两遍。

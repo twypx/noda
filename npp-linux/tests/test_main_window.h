@@ -9,4 +9,8 @@ private slots:
     void saveFailureNotifiesUserAndKeepsFile();
     // 周期备份只有在文档内容确实发生新修改时才写盘
     void backupOnlyWhenDirty();
+    // 菜单栏必须包含“帮助”菜单与“关于 Notepad++”动作
+    void helpMenuAndAboutActionExist();
+    // “关于”对话框必须包含正确的版本号与相关系统信息
+    void aboutDialogContentMatchesVersion();
 };

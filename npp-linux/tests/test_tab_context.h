@@ -27,4 +27,7 @@ private slots:
 
     // 边界禁用规则与真正的重排效果。
     void moveItemsRespectEdgesAndReorder();
+
+    // 关闭未保存修改的标签页时，保存确认弹窗的按钮必须显示中文“是/否/取消”。
+    void closeModifiedTabPromptHasChineseButtons();
 };

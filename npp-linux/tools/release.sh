@@ -20,23 +20,33 @@ if [[ -z "$TAG" ]]; then
     exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
 # ---- 1. tag 格式 -----------------------------------------------------------
+if [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    TAG="v${TAG}"
+fi
 if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "错误: tag 需形如 v1.0.0，当前为 '${TAG}'" >&2
+    echo "错误: tag 需形如 v1.0.0 或 1.0.0，当前为 '${TAG}'" >&2
     exit 1
 fi
 VERSION="${TAG#v}"
 
-# ---- 2. 版本号：与 tag 不一致时自动改写 CMakeLists ---------------------------
+# ---- 2. 版本号：与 tag 不一致时自动改写 CMakeLists 与 Version.h ------------
 # deb 的版本由 CMake 的 project(VERSION) 决定，tag 只是个标签。两者一旦不同步，
 # Release 上就会出现「tag 叫 v1.2.0、包却是 1.0.0-1」这种事故。
-# 这里直接改文件而不是报错让用户返工；提交与推送在第 4 步做（必须先到远端，
-# tag 才能指向含正确版本号的 commit）。
+# 同时把版本号写回 C++ 代码头文件 src/Version.h，确保运行时“关于”对话框与二进制
+# 获得的版本号与发版参数完全一致。
 CMAKE_FILE="npp-linux/CMakeLists.txt"
+VERSION_HEADER="npp-linux/src/Version.h"
 CMAKE_VER="$(sed -n '/^project(/,/)/p' "$CMAKE_FILE" \
     | grep -oE 'VERSION +[0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $2}')"
 if [[ -z "$CMAKE_VER" ]]; then
@@ -47,8 +57,6 @@ VERSION_BUMPED=0
 if [[ "$CMAKE_VER" != "$VERSION" ]]; then
     echo ">>> CMakeLists 版本 ${CMAKE_VER} → ${VERSION}（自动改写）"
     # 限定在 project(...) 块内替换，避免误伤 CPACK_PACKAGE_VERSION 之类的引用。
-    # 整行重写而不是只换版本号数字：sed 的替换串里 \1 后面紧跟数字会被当成
-    # 第 11 个反向引用（\11），而版本号恰好以数字开头。
     sed -i "/^project(/,/)/ s/^\([[:space:]]*\)VERSION[[:space:]].*/\1VERSION ${VERSION}/" "$CMAKE_FILE"
     CMAKE_VER="$(sed -n '/^project(/,/)/p' "$CMAKE_FILE" \
         | grep -oE 'VERSION +[0-9]+\.[0-9]+\.[0-9]+' | head -1 | awk '{print $2}')"
@@ -57,6 +65,15 @@ if [[ "$CMAKE_VER" != "$VERSION" ]]; then
         exit 1
     fi
     VERSION_BUMPED=1
+fi
+
+if [[ -f "$VERSION_HEADER" ]]; then
+    CURR_H_VER="$(grep -oE '#define NPP_VERSION_STRING +"[0-9]+\.[0-9]+\.[0-9]+"' "$VERSION_HEADER" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
+    if [[ "$CURR_H_VER" != "$VERSION" ]]; then
+        echo ">>> Version.h 版本 ${CURR_H_VER:-<无>} → ${VERSION}（自动改写）"
+        sed -i "s/#define NPP_VERSION_STRING .*/#define NPP_VERSION_STRING \"${VERSION}\"/" "$VERSION_HEADER"
+        VERSION_BUMPED=1
+    fi
 fi
 
 # ---- 3. 解析 Gitee 仓库 ----------------------------------------------------
@@ -86,8 +103,8 @@ if [[ $VERSION_BUMPED -eq 1 ]]; then
         # 没有差异就不提交，否则 git commit 会因 nothing to commit 直接退出。
         echo ">>> 版本号与 HEAD 一致，无需提交"
     else
-        git add "$CMAKE_FILE"
-        git commit -q -m "CMakeLists VERSION 升至 ${VERSION}（发布 ${TAG}）"
+        git add "$CMAKE_FILE" "$VERSION_HEADER"
+        git commit -q -m "版本升至 ${VERSION}（发布 ${TAG}）"
         echo ">>> 已提交版本号改动"
     fi
 fi

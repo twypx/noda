@@ -2,9 +2,13 @@
 #include "MainWindow.h"
 #include "TabManager.h"
 #include "EditorView.h"
+#include "dialogs/AboutDlg.h"
+#include "Version.h"
 
 #include <QtTest>
 #include <QFile>
+#include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -93,4 +97,40 @@ void TestMainWindow::backupOnlyWhenDirty() {
     const QDateTime thirdModified = QFileInfo(backupPath).lastModified();
     QVERIFY(thirdModified >= secondModified);
 }
+
+void TestMainWindow::helpMenuAndAboutActionExist() {
+    MainWindow window;
+    auto* bar = window.findChild<QMenuBar*>();
+    QVERIFY(bar);
+
+    QMenu* helpMenu = nullptr;
+    for (auto* act : bar->actions()) {
+        if (act->text().contains(QStringLiteral("帮助"))) {
+            helpMenu = act->menu();
+            break;
+        }
+    }
+    QVERIFY2(helpMenu, "菜单栏必须包含'帮助'菜单");
+
+    QAction* aboutAct = nullptr;
+    for (auto* act : helpMenu->actions()) {
+        if (act->text().contains(QStringLiteral("关于"))) {
+            aboutAct = act;
+            break;
+        }
+    }
+    QVERIFY2(aboutAct, "帮助菜单必须包含'关于'子菜单项");
+    QCOMPARE(aboutAct->shortcut(), QKeySequence(Qt::Key_F1));
+    QVERIFY2(!aboutAct->icon().isNull(), "关于动作必须配置图标");
+}
+
+void TestMainWindow::aboutDialogContentMatchesVersion() {
+    MainWindow window;
+    AboutDlg dlg(&window);
+    QVERIFY(dlg.windowTitle().contains(QStringLiteral("关于")));
+    QVERIFY2(dlg.versionString().contains(QString::fromUtf8(NPP_VERSION_STRING)), "关于对话框必须显示正确的版本号");
+    QVERIFY(dlg.versionString().contains("64-bit"));
+    QVERIFY(!dlg.buildTime().isEmpty());
+}
+
 

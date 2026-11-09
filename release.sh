@@ -1,0 +1,1 @@
+npp-linux/tools/release.sh

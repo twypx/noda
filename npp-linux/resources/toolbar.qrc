@@ -12,6 +12,8 @@
     <file alias="folder-tree_32.png">icons/toolbar/dark/folder-tree_32.png</file>
     <file alias="indent-guide_16.png">icons/toolbar/dark/indent-guide_16.png</file>
     <file alias="indent-guide_32.png">icons/toolbar/dark/indent-guide_32.png</file>
+    <file alias="info_16.png">icons/toolbar/dark/info_16.png</file>
+    <file alias="info_32.png">icons/toolbar/dark/info_32.png</file>
     <file alias="list-x_16.png">icons/toolbar/dark/list-x_16.png</file>
     <file alias="list-x_32.png">icons/toolbar/dark/list-x_32.png</file>
     <file alias="pilcrow_16.png">icons/toolbar/dark/pilcrow_16.png</file>
@@ -56,6 +58,8 @@
     <file alias="folder-tree_32.png">icons/toolbar/light/folder-tree_32.png</file>
     <file alias="indent-guide_16.png">icons/toolbar/light/indent-guide_16.png</file>
     <file alias="indent-guide_32.png">icons/toolbar/light/indent-guide_32.png</file>
+    <file alias="info_16.png">icons/toolbar/light/info_16.png</file>
+    <file alias="info_32.png">icons/toolbar/light/info_32.png</file>
     <file alias="list-x_16.png">icons/toolbar/light/list-x_16.png</file>
     <file alias="list-x_32.png">icons/toolbar/light/list-x_32.png</file>
     <file alias="pilcrow_16.png">icons/toolbar/light/pilcrow_16.png</file>

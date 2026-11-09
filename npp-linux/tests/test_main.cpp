@@ -15,6 +15,7 @@
 #include "test_folder_tree.h"
 #include "test_folder_tree_main_window.h"
 #include "test_tab_context.h"
+#include "test_single_instance.h"
 
 int main(int argc, char* argv[]) {
     // QSettings 的默认路径在 QCoreApplication 构造时确定，隔离必须在此之前。
@@ -52,6 +53,8 @@ int main(int argc, char* argv[]) {
     failures += QTest::qExec(&testFolderTreeMainWindow, argc, argv);
     TestTabContext testTabContext;
     failures += QTest::qExec(&testTabContext, argc, argv);
+    TestSingleInstance testSingleInstance;
+    failures += QTest::qExec(&testSingleInstance, argc, argv);
 
     return failures == 0 ? 0 : 1;
 }

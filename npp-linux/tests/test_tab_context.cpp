@@ -8,7 +8,9 @@
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPointer>
+#include <QPushButton>
 #include <QScopedPointer>
 #include <QSignalSpy>
 #include <QTabBar>
@@ -263,3 +265,37 @@ void TestTabContext::moveItemsRespectEdgesAndReorder() {
     QVERIFY(!findAction(moveAtZero, QStringLiteral("移到最前"))->isEnabled());
     QVERIFY(findAction(moveAtZero, QStringLiteral("移到最后"))->isEnabled());
 }
+
+void TestTabContext::closeModifiedTabPromptHasChineseButtons() {
+    MainWindow window;
+    TabManager* tabs = tabsOf(window);
+    QVERIFY(tabs);
+    auto* ed = tabs->currentEditor();
+    QVERIFY(ed);
+
+    // 修改文档产生脏状态
+    const char text[] = "unsaved changes";
+    ed->send(SCI_APPENDTEXT, sizeof(text) - 1, reinterpret_cast<sptr_t>(text));
+    QVERIFY(ed->buffer()->isModified());
+
+    QString yesText, noText, cancelText;
+    QTimer::singleShot(0, [&window, &yesText, &noText, &cancelText]() {
+        const auto boxes = window.findChildren<QMessageBox*>();
+        for (auto* box : boxes) {
+            for (auto* b : box->buttons()) {
+                QString t = b->text();
+                if (t.contains(QStringLiteral("是"))) yesText = t;
+                if (t.contains(QStringLiteral("否"))) noText = t;
+                if (t.contains(QStringLiteral("取消"))) cancelText = t;
+            }
+            box->reject();
+        }
+    });
+
+    bool closed = tabs->closeTab(0);
+    QVERIFY(!closed);
+    QVERIFY2(yesText.contains(QStringLiteral("是")), "保存按钮必须包含中文'是'");
+    QVERIFY2(noText.contains(QStringLiteral("否")), "不保存按钮必须包含中文'否'");
+    QVERIFY2(cancelText.contains(QStringLiteral("取消")), "取消按钮必须包含中文'取消'");
+}
+
