@@ -113,12 +113,6 @@ This repository vendors every third-party source needed to build, so the directo
 | `PowerEditor/src/pugixml/` | Upstream (vendored) | XML parsing for language/style models |
 | `PowerEditor/src/langs.model.xml`<br>`PowerEditor/src/stylers.model.xml` | Upstream (vendored) | Language and theme definitions, reused verbatim |
 
-## Documentation
-
-- Detailed technical documentation (Chinese): **[npp-linux/README.md](npp-linux/README.md)**
-- Development plan and module log: **[docs/开发计划2.md](docs/开发计划2.md)**
-- 简体中文说明: **[docs/README.zh-CN.md](docs/README.zh-CN.md)**
-
 ## License
 
 - Noda is released under the **GNU General Public License v3.0 (GPL-3.0)** — see [`LICENSE`](LICENSE).
