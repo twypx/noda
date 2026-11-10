@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
+#include <QPointer>
 #include "widgets/DiffMiniMap.h"
 #include "utils/ConfigMigration.h"
 
@@ -618,4 +619,45 @@ void TestDiffEngine::asyncCompareCloseDuringComputationIsSafe()
     }
     delete edA;
     delete edB;
+}
+
+// 进入比对模式时 setCentralWidget 会把旧的 central widget（TabManager）排队删除；
+// 7 秒后的 syncBackups() 定时器再访问它就崩溃（真实环境 SIGSEGV @ QTabBar::count()）。
+void TestDiffEngine::compareModeKeepsTabManagerAlive()
+{
+    MainWindow win;
+    win.show();
+    auto* tabMgr = win.findChild<TabManager*>();
+    QVERIFY(tabMgr != nullptr);
+    tabMgr->createNewTab();
+
+    auto* ed1 = tabMgr->editorAt(0);
+    auto* ed2 = tabMgr->editorAt(1);
+    QVERIFY(ed1 != nullptr && ed2 != nullptr);
+    ed1->setTextFromUtf8("hello\nworld\n");
+    ed2->setTextFromUtf8("hello\nchanged\n");
+
+    QPointer<QWidget> guard(tabMgr);
+    auto* actCompare = win.findChild<QAction*>("actCompare");
+    QVERIFY(actCompare != nullptr);
+    actCompare->trigger();
+    auto* cmp = win.findChild<CompareWidget*>();
+    QVERIFY(cmp != nullptr);
+
+    // 让 DeferredDelete / 定时器等事件真正派发
+    for (int i = 0; i < 20; ++i) {
+        QCoreApplication::processEvents();
+        QTest::qWait(10);
+    }
+    QVERIFY2(!guard.isNull(), "进入比对后 TabManager 被销毁，备份定时器将访问悬空指针");
+    QCOMPARE(win.centralWidget(), static_cast<QWidget*>(cmp));
+
+    // 显式触发备份槽（真实场景由 7 秒定时器触发），必须安全返回
+    QVERIFY(QMetaObject::invokeMethod(&win, "syncBackups", Qt::DirectConnection));
+
+    auto* actClear = win.findChild<QAction*>("actClearCompare");
+    QVERIFY(actClear != nullptr);
+    actClear->trigger();
+    QVERIFY(!guard.isNull());
+    QCOMPARE(win.centralWidget(), static_cast<QWidget*>(tabMgr));
 }

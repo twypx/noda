@@ -243,6 +243,9 @@ private:
     // 通过 QProcess 调系统 git / svn 读取版本内容，零链接依赖。
     static QString vcsContent(const QString& filePath, bool git);
     void compareWithVcs(bool git);
+    // 安全切换 central widget：先用 takeCentralWidget() 取回旧控件所有权，
+    // 避免 QMainWindow::setCentralWidget 把旧控件 deleteLater（比对模式崩溃根因）。
+    void switchCentralWidget(QWidget* next);
     // 标签右键菜单的弹出入口；菜单项全部通过 createTabContextMenu() 构建。
     void showTabContextMenu(int index, const QPoint& globalPos);
 
@@ -309,6 +312,7 @@ private:
     void restartBackupTimer();
 
     TabManager* _tabManager{nullptr};
+    QPointer<TabManager> _tabManagerAlive; // 定时器访问前的悬空保护（对象被删会自动置空）
     // 左侧目录树：既是 QDockWidget 也是数据/视图的持有者，初始隐藏。
     FolderTreePane* _folderTree{nullptr};
     QAction* _actFolderTree{nullptr};

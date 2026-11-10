@@ -144,7 +144,8 @@ MainWindow::MainWindow(QWidget* parent)
     setContentsMargins(1, 1, 1, 1);
     // 编辑区由 ScintillaEditBase 自己接收拖放；主窗口覆盖标题栏/标签栏/工具栏/状态栏等其余区域。
     setAcceptDrops(true);
-    setCentralWidget(_tabManager);
+    switchCentralWidget(_tabManager);
+    _tabManagerAlive = _tabManager;
     setWindowTitle(QStringLiteral("Noda"));
     resize(1080, 780);
 
@@ -1876,12 +1877,28 @@ bool MainWindow::createCompareView(const std::string& textA, const std::string& 
         if (computing) statusBar()->showMessage(l10n(QStringLiteral("正在比对…")));
     });
 
-    setCentralWidget(_compareWidget);
+    switchCentralWidget(_compareWidget);
 
     if (_actClearCompare) _actClearCompare->setEnabled(true);
     if (_actNextDiff) _actNextDiff->setEnabled(_compareWidget->totalDiffCount() > 0);
     if (_actPrevDiff) _actPrevDiff->setEnabled(_compareWidget->totalDiffCount() > 0);
     return true;
+}
+
+// QMainWindow::setCentralWidget 会把旧的 central widget 排队删除（deleteLater）。
+// 进入比对时若不做处理，TabManager 会在下一个事件循环被销毁，而 7 秒后的
+// syncBackups() 定时器仍通过 _tabManager 访问 QTabBar::count() → SIGSEGV。
+// 用 takeCentralWidget() 显式取回所有权即可让两个视图都长期存活。
+void MainWindow::switchCentralWidget(QWidget* next) {
+    QWidget* previous = takeCentralWidget();
+    if (previous) {
+        previous->hide();
+        previous->setParent(nullptr); // 所有权归本类，Qt 不再 deleteLater
+    }
+    if (next) {
+        setCentralWidget(next);
+        next->show();
+    }
 }
 
 void MainWindow::onCloseCompare() {
@@ -1891,8 +1908,7 @@ void MainWindow::onCloseCompare() {
     _compareWidget = nullptr;
 
     cmp->clearDiff();
-    cmp->setParent(nullptr);   // 脱离主窗口布局所有权，避免 setCentralWidget 误删
-    setCentralWidget(_tabManager);
+    switchCentralWidget(_tabManager);
     delete cmp;                // 析构会把两个副本编辑器 detach
 
     delete _compareEdA;
@@ -2445,6 +2461,8 @@ void MainWindow::saveSession() {
 }
 
 void MainWindow::syncBackups() {
+    // 该槽由定时器调用；若 TabManager 因任何原因已被销毁，宁可跳过本轮备份也不能访问悬空指针。
+    if (_tabManagerAlive.isNull()) return;
     if (!_prefs.rememberSession || !_prefs.snapshotBackup) return;
 
     bool sessionChanged = false;

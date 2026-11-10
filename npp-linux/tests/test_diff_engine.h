@@ -33,4 +33,5 @@ private slots:
     void compareViewStableAcrossEventLoop();
     void repeatedRefreshWhileAsyncIsSafe();
     void asyncCompareCloseDuringComputationIsSafe();
+    void compareModeKeepsTabManagerAlive();
 };
