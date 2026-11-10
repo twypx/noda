@@ -40,6 +40,9 @@ jobs:
           cd npp-linux
           chmod +x tests/run_tests.sh
           ./tests/run_tests.sh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          XDG_CONFIG_HOME: /tmp/noda_ci_config
 
       - name: Build DEB package
         run: |

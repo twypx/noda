@@ -65,6 +65,10 @@ void TestSingleInstance::mainWindowOpensTabOnIpcMessage() {
     f.close();
 
     const int initialCount = tabs->count();
+    // 将初始标签设为已修改或有内容，避免触发“复用空白初始标签”逻辑，确保验证“新开标签页”能力
+    auto* cur = tabs->currentEditor();
+    QVERIFY(cur);
+    cur->send(SCI_SETTEXT, 0, reinterpret_cast<sptr_t>("Existing Content"));
 
     // 触发 IPC 文件打开接口
     window.openFilesFromIpc({filePath});

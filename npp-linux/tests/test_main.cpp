@@ -25,56 +25,83 @@
 #include "test_diff_engine.h"
 
 int main(int argc, char* argv[]) {
-    // QSettings 的默认路径在 QCoreApplication 构造时确定，隔离必须在此之前。
-    const QByteArray configHome = qgetenv("XDG_CONFIG_HOME");
-    if (!configHome.isEmpty()) {
-        QDir(QString::fromLocal8Bit(configHome)).removeRecursively();
-        QDir().mkpath(QString::fromLocal8Bit(configHome));
+    // 强制隔离测试沙箱：无论外部是否提供 XDG_CONFIG_HOME，都确保指向独立的空目录，
+    // 绝对不读取宿主真实 ~/.config/Noda 下的 session.xml/backup，防止测试互串。
+    QByteArray configHome = qgetenv("XDG_CONFIG_HOME");
+    if (configHome.isEmpty()) {
+        const QString tempConfig = QDir::tempPath() + QStringLiteral("/noda_test_config");
+        configHome = tempConfig.toLocal8Bit();
+        qputenv("XDG_CONFIG_HOME", configHome);
     }
+    QDir(QString::fromLocal8Bit(configHome)).removeRecursively();
+    QDir().mkpath(QString::fromLocal8Bit(configHome));
     qputenv("QT_QPA_PLATFORM", "offscreen");
 
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("Noda"));
     QCoreApplication::setOrganizationName(QStringLiteral("Noda"));
 
+    auto resetConfigSandbox = [&configHome]() {
+        QDir(QString::fromLocal8Bit(configHome)).removeRecursively();
+        QDir().mkpath(QString::fromLocal8Bit(configHome));
+    };
+
     int failures = 0;
+    resetConfigSandbox();
     TestEncoding testEncoding;
     failures += QTest::qExec(&testEncoding, argc, argv);
+    resetConfigSandbox();
     TestV108Baseline testV108Baseline;
     failures += QTest::qExec(&testV108Baseline, argc, argv);
+    resetConfigSandbox();
     TestEditorSave testEditorSave;
     failures += QTest::qExec(&testEditorSave, argc, argv);
+    resetConfigSandbox();
     TestMainWindow testMainWindow;
     failures += QTest::qExec(&testMainWindow, argc, argv);
+    resetConfigSandbox();
     TestConfig testConfig;
     failures += QTest::qExec(&testConfig, argc, argv);
+    resetConfigSandbox();
     TestStyleConfig testStyleConfig;
     failures += QTest::qExec(&testStyleConfig, argc, argv);
+    resetConfigSandbox();
     TestShortcuts testShortcuts;
     failures += QTest::qExec(&testShortcuts, argc, argv);
+    resetConfigSandbox();
     TestFold testFold;
     failures += QTest::qExec(&testFold, argc, argv);
+    resetConfigSandbox();
     TestFolderTree testFolderTree;
     failures += QTest::qExec(&testFolderTree, argc, argv);
+    resetConfigSandbox();
     TestFolderTreeMainWindow testFolderTreeMainWindow;
     failures += QTest::qExec(&testFolderTreeMainWindow, argc, argv);
+    resetConfigSandbox();
     TestTabContext testTabContext;
     failures += QTest::qExec(&testTabContext, argc, argv);
+    resetConfigSandbox();
     TestSingleInstance testSingleInstance;
     failures += QTest::qExec(&testSingleInstance, argc, argv);
+    resetConfigSandbox();
     TestPreferencesDialog testPreferencesDialog;
     failures += QTest::qExec(&testPreferencesDialog, argc, argv);
-    // 放最后：它会重新加载真实配置，避免影响前面的精简 XML 夹具。
+    resetConfigSandbox();
     TestTypeScript testTypeScript;
     failures += QTest::qExec(&testTypeScript, argc, argv);
+    resetConfigSandbox();
     TestPerformance testPerformance;
     failures += QTest::qExec(&testPerformance, argc, argv);
+    resetConfigSandbox();
     TestUrlLink testUrlLink;
     failures += QTest::qExec(&testUrlLink, argc, argv);
+    resetConfigSandbox();
     TestHexView testHexView;
     failures += QTest::qExec(&testHexView, argc, argv);
+    resetConfigSandbox();
     TestLocalization testLocalization;
     failures += QTest::qExec(&testLocalization, argc, argv);
+    resetConfigSandbox();
     TestDiffEngine testDiffEngine;
     failures += QTest::qExec(&testDiffEngine, argc, argv);
 
