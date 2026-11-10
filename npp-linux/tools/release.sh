@@ -121,6 +121,9 @@ if [[ -n "$(git log origin/master..HEAD --oneline 2>/dev/null)" ]]; then
     if [[ $VERSION_BUMPED -eq 1 ]]; then
         echo ">>> 推送版本号提交..."
         git push -q origin master
+        if git remote | grep -q "^github$"; then
+            git push -q github master || true
+        fi
     fi
     if [[ -n "$(git log origin/master..HEAD --oneline 2>/dev/null)" ]]; then
         echo "错误: 存在尚未推送的提交，请先 git push origin master" >&2
@@ -165,6 +168,10 @@ fi
 
 # ---- 7. 推送 tag -----------------------------------------------------------
 git push origin "${TAG}"
+if git remote | grep -q "^github$"; then
+    echo ">>> 推送 tag ${TAG} 到 GitHub（将自动触发 GitHub Actions 打包发布）..."
+    git push -q github "${TAG}" || echo "警告: 推送 tag 到 GitHub 失败，请检查网络或权限" >&2
+fi
 
 # ---- 8. 准备令牌 -----------------------------------------------------------
 if [[ -z "${GITEE_TOKEN:-}" ]]; then
