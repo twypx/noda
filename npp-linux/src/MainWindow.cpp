@@ -46,6 +46,13 @@
 #include "utils/SingleInstance.h"
 
 namespace {
+// 状态栏 showMessage 是运行期文本，不走 QObject 属性翻译；显式按当前语言取词。
+inline QString l10n(const QString& source) {
+    return LocalizationManager::instance().translate(source);
+}
+} // namespace
+
+namespace {
 // 写盘期间临时解除对该路径的 inotify 监视，析构后恢复，避免自身保存触发“外部修改”假警报。
 class WatchGuard {
 public:
@@ -537,6 +544,15 @@ void MainWindow::setupViewMenu() {
     _actCompare = menu->addAction(tr("文件对比(&C)"), this, &MainWindow::onCompareFiles);
     _actCompare->setObjectName("actCompare");
     _actCompare->setShortcut(QKeySequence(tr("Ctrl+Alt+C")));
+
+    _actCompareSelection = menu->addAction(tr("比对选区(&S)"), this, &MainWindow::onCompareSelection);
+    _actCompareSelection->setObjectName("actCompareSelection");
+
+    _actCompareGit = menu->addAction(tr("与 Git HEAD 比对(&G)"), this, &MainWindow::onCompareGitHead);
+    _actCompareGit->setObjectName("actCompareGit");
+
+    _actCompareSvn = menu->addAction(tr("与 SVN BASE 比对(&V)"), this, &MainWindow::onCompareSvnBase);
+    _actCompareSvn->setObjectName("actCompareSvn");
 
     _actClearCompare = menu->addAction(tr("关闭对比(&X)"), this, &MainWindow::onCloseCompare);
     _actClearCompare->setObjectName("actClearCompare");
@@ -1737,7 +1753,7 @@ void MainWindow::onCompareFiles() {
     }
 
     if (_tabManager->count() < 2) {
-        statusBar()->showMessage(tr("比对功能至少需要打开两个标签页"), 3000);
+        statusBar()->showMessage(l10n(QStringLiteral("比对功能至少需要打开两个标签页")), 3000);
         return;
     }
 
@@ -1747,37 +1763,117 @@ void MainWindow::onCompareFiles() {
     EditorView* edB = _tabManager->editorAt(std::max(curr, other));
     if (!edA || !edB) return;
 
-    // 大文件护栏：单侧 16MB 以上直接拒绝，避免同步比对卡死 UI 或耗尽内存。
-    constexpr sptr_t kMaxCompareBytes = 16 * 1024 * 1024;
-    if (edA->send(SCI_GETLENGTH) > kMaxCompareBytes || edB->send(SCI_GETLENGTH) > kMaxCompareBytes) {
-        statusBar()->showMessage(tr("文件过大，暂不支持比对（单侧上限 16MB）"), 5000);
+    createCompareView(edA->currentTextUtf8(), edB->currentTextUtf8(),
+                      edA->currentLanguage(), edB->currentLanguage());
+}
+
+void MainWindow::onCompareSelection() {
+    if (_tabManager->count() < 2) {
+        statusBar()->showMessage(l10n(QStringLiteral("选区比对至少需要打开两个标签页")), 3000);
         return;
     }
+    const int curr = _tabManager->currentIndex();
+    const int other = (curr > 0) ? (curr - 1) : 1;
+    EditorView* edA = _tabManager->editorAt(std::min(curr, other));
+    EditorView* edB = _tabManager->editorAt(std::max(curr, other));
+    if (!edA || !edB) return;
 
-    // 用独立副本比对，绝不 reparent TabManager 的页面：关闭对比后标签页仍然完好。
+    const bool hasSelA = edA->send(SCI_GETSELECTIONEND) > edA->send(SCI_GETSELECTIONSTART);
+    const bool hasSelB = edB->send(SCI_GETSELECTIONEND) > edB->send(SCI_GETSELECTIONSTART);
+    if (!hasSelA && !hasSelB) {
+        statusBar()->showMessage(l10n(QStringLiteral("请先在任一侧选中一段文本，再执行选区比对")), 4000);
+        return;
+    }
+    // 未选区的一侧退化为全文，避免误比对空串。
+    createCompareView(edA->selectedTextUtf8(), edB->selectedTextUtf8(),
+                      edA->currentLanguage(), edB->currentLanguage());
+}
+
+QString MainWindow::vcsContent(const QString& filePath, bool git) {
+    const QFileInfo fi(filePath);
+    if (!fi.exists()) return QString();
+
+    QStringList args;
+    if (git) {
+        args << QStringLiteral("-C") << fi.absolutePath()
+             << QStringLiteral("show") << (QStringLiteral("HEAD:") + fi.fileName());
+    } else {
+        args << QStringLiteral("cat") << QStringLiteral("-r")
+             << QStringLiteral("BASE") << fi.absoluteFilePath();
+    }
+    QProcess proc;
+    proc.start(git ? QStringLiteral("git") : QStringLiteral("svn"), args);
+    if (!proc.waitForStarted(1000)) return QString();
+    if (!proc.waitForFinished(5000)) {
+        proc.kill();
+        proc.waitForFinished(1000);
+        return QString();
+    }
+    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) return QString();
+    return QString::fromUtf8(proc.readAllStandardOutput());
+}
+
+void MainWindow::compareWithVcs(bool git) {
+    EditorView* ed = _tabManager->currentEditor();
+    if (!ed) return;
+    const QString path = QString::fromStdString(ed->buffer()->getFilePath());
+    if (path.isEmpty()) {
+        statusBar()->showMessage(l10n(QStringLiteral("请先保存文件，再与版本库内容比对")), 4000);
+        return;
+    }
+    const QString base = vcsContent(path, git);
+    if (base.isEmpty()) {
+        statusBar()->showMessage(l10n(QStringLiteral("无法读取版本内容（命令不可用或文件不在版本库中）")), 5000);
+        return;
+    }
+    createCompareView(base.toStdString(), ed->currentTextUtf8(),
+                      ed->currentLanguage(), ed->currentLanguage());
+}
+
+void MainWindow::onCompareGitHead() { compareWithVcs(true); }
+void MainWindow::onCompareSvnBase() { compareWithVcs(false); }
+
+// 文件 / 选区 / VCS 三种比对入口共用的视图创建。返回 false 表示被护栏拒绝。
+bool MainWindow::createCompareView(const std::string& textA, const std::string& textB,
+                                   const std::string& langA, const std::string& langB) {
+    // 大文件护栏：单侧 16MB 以上直接拒绝。超过 256KB 的部分由 CompareWidget 走工作线程。
+    constexpr size_t kMaxCompareBytes = 16 * 1024 * 1024;
+    if (textA.size() > kMaxCompareBytes || textB.size() > kMaxCompareBytes) {
+        statusBar()->showMessage(l10n(QStringLiteral("文件过大，暂不支持比对（单侧上限 16MB）")), 5000);
+        return false;
+    }
+
+    if (_compareWidget) onCloseCompare();
+
+    // 用独立只读副本比对，绝不 reparent TabManager 的页面：关闭对比后标签页仍然完好。
     _compareEdA = new EditorView();
     _compareEdB = new EditorView();
-    _compareEdA->setTextFromUtf8(edA->currentTextUtf8());
-    _compareEdB->setTextFromUtf8(edB->currentTextUtf8());
+    _compareEdA->setTextFromUtf8(textA);
+    _compareEdB->setTextFromUtf8(textB);
     _compareEdA->send(SCI_SETREADONLY, 1);
     _compareEdB->send(SCI_SETREADONLY, 1);
     _compareEdA->setDarkMode(_prefs.darkMode);
     _compareEdB->setDarkMode(_prefs.darkMode);
-    _compareEdA->applyLanguage(edA->currentLanguage());
-    _compareEdB->applyLanguage(edB->currentLanguage());
+    _compareEdA->applyLanguage(langA);
+    _compareEdB->applyLanguage(langB);
 
     _compareWidget = new CompareWidget(_compareEdA, _compareEdB, _prefs.darkMode, this);
     connect(_compareWidget, &CompareWidget::diffNavigated, this, [this](int cur, int total) {
         if (!_compareWidget) return;
         if (total > 0) {
-            statusBar()->showMessage(tr("比对完成：%1 处新增，%2 处删除，%3 处修改 | 差异 %4/%5")
-                .arg(_compareWidget->addedCount())
-                .arg(_compareWidget->removedCount())
-                .arg(_compareWidget->modifiedCount())
-                .arg(cur).arg(total));
+            statusBar()->showMessage(
+                l10n(QStringLiteral("比对完成：%1 处新增，%2 处删除，%3 处修改，%4 处移动 | 差异 %5/%6"))
+                    .arg(_compareWidget->addedCount())
+                    .arg(_compareWidget->removedCount())
+                    .arg(_compareWidget->modifiedCount())
+                    .arg(_compareWidget->movedCount())
+                    .arg(cur).arg(total));
         } else {
-            statusBar()->showMessage(tr("文件完全一致，未发现差异"), 4000);
+            statusBar()->showMessage(l10n(QStringLiteral("文件完全一致，未发现差异")), 4000);
         }
+    });
+    connect(_compareWidget, &CompareWidget::diffComputing, this, [this](bool computing) {
+        if (computing) statusBar()->showMessage(l10n(QStringLiteral("正在比对…")));
     });
 
     setCentralWidget(_compareWidget);
@@ -1785,6 +1881,7 @@ void MainWindow::onCompareFiles() {
     if (_actClearCompare) _actClearCompare->setEnabled(true);
     if (_actNextDiff) _actNextDiff->setEnabled(_compareWidget->totalDiffCount() > 0);
     if (_actPrevDiff) _actPrevDiff->setEnabled(_compareWidget->totalDiffCount() > 0);
+    return true;
 }
 
 void MainWindow::onCloseCompare() {

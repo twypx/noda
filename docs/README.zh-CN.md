@@ -47,6 +47,10 @@ Qt6 Widgets 重写。它不是 Wine 包装，也不是 Electron 应用。
   正确的 Wayland 处理。
 - **URL 可点击**：可见区域内的 URL 自动加下划线，`Ctrl` + 点击即在默认浏览器打开。
 - **二进制文件直接可用**：含 NUL 字节的文件自动以十六进制打开，显示**磁盘原始字节**而非解码后的文本。
+- **面向大文件的比对引擎**：Histogram/Patience 锚点 + 有界 Myers（无 O(D²) 内存）、wyhash 风格块哈希、
+  真正的字符级行内差异、块移动检测，以及 `QtConcurrent` 异步比对，UI 不卡顿。
+- **不止比两份文件**：整篇 / 选区 / 与 Git HEAD / 与 SVN BASE 比对（`QProcess` 调用系统命令，零链接依赖），
+  差异小地图点击跳转，按对齐行映射的滚动同步在占位行存在时也不漂移。
 
 ## 核心功能
 
@@ -67,6 +71,9 @@ Qt6 Widgets 重写。它不是 Wine 包装，也不是 Electron 应用。
 - [x] 打开文件夹：左侧停靠窗惰性加载的目录树，零递归预扫描。
 - [x] 内置十六进制 / 二进制查看器，显示磁盘原始字节。
 - [x] TypeScript / TSX 语法高亮。
+- [x] 并排比对：整篇 / 选区 / Git HEAD / SVN BASE，块移动识别、行内字符高亮、
+      差异导航（`F8` / `Shift+F8`）、差异分布小地图。
+- [x] 忽略空白 / 大小写 / 换行符选项、运行时中英文切换、改名后旧配置一次性自动迁移。
 
 ## 快速开始
 
@@ -76,7 +83,7 @@ sudo apt install -y build-essential cmake qt6-base-dev qt6-base-dev-tools
 
 cd npp-linux
 ./build.sh
-./build/notepad-plus-plus-linux
+./build/noda
 ```
 
 打包为 `.deb`：
@@ -84,7 +91,7 @@ cd npp-linux
 ```bash
 cd npp-linux
 ./build_deb.sh
-sudo apt install ./build-deb/notepad-plus-plus-linux_*_amd64.deb
+sudo apt install ./build-deb/noda_*_amd64.deb
 ```
 
 工具栏与应用图标由 `npp-linux/tools/*.py` 离线生成并内嵌为 Qt 资源，常规构建不需要 Python、
@@ -104,6 +111,13 @@ sudo apt install ./build-deb/notepad-plus-plus-linux_*_amd64.deb
 | `PowerEditor/src/pugixml/` | 上游 vendored | 解析语言与样式 XML |
 | `PowerEditor/src/langs.model.xml`<br>`PowerEditor/src/stylers.model.xml` | 上游 vendored | 语言与主题定义，直接复用原版资产 |
 
+
+## 文档
+
+- 英文技术文档（默认）：**[../npp-linux/README.md](../npp-linux/README.md)**
+- 完整中文技术文档：**[README.technical.zh-CN.md](README.technical.zh-CN.md)**
+- 开发计划与模块记录：**[开发计划2.md](开发计划2.md)**
+- English README: **[../README.md](../README.md)**
 
 ## 许可
 

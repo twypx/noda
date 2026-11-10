@@ -50,6 +50,8 @@ public:
     // 不要把 setTextFromUtf8 当成"打开文件"用：它不动文件路径、编码与语言，
     // 这些由调用方按 session.xml 里记录的值回填，才能保证下次保存仍按原编码写回。
     std::string currentTextUtf8() const;
+    // 选区文本（UTF-8）；无选区时退化为全文，供「比对选区」使用。
+    std::string selectedTextUtf8() const;
     // 零拷贝：直接返回 Scintilla 内部 UTF-8 缓冲视图。仅在文档不被修改期间有效，
     // 供比对/统计等只读同步计算使用，避免整份文本拷贝。
     std::string_view currentTextView() const;

@@ -2,6 +2,14 @@
 #include "utils/DiffEngine.h"
 #include <QCheckBox>
 #include <QElapsedTimer>
+#include <QSignalSpy>
+#include <QPoint>
+#include <QAction>
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
+#include "widgets/DiffMiniMap.h"
+#include "utils/ConfigMigration.h"
 
 void TestDiffEngine::identicalTextYieldsNoDiff()
 {
@@ -325,4 +333,199 @@ void TestDiffEngine::mainWindowCompareActions()
     QCOMPARE(tabMgr->editorAt(1), ed2);
     QCOMPARE(QString::fromStdString(ed1->currentTextUtf8()), QStringLiteral("hello\nworld\n"));
     QCOMPARE(QString::fromStdString(ed2->currentTextUtf8()), QStringLiteral("hello\nmodified world\n"));
+}
+
+// P.7：wyhash 必须确定、可区分，且长行（8 字节块读路径）同样稳定。
+void TestDiffEngine::wyhashIsDeterministicAndDispersive()
+{
+    QCOMPARE(Diff::DiffEngine::hashLine("hello"), Diff::DiffEngine::hashLine("hello"));
+    QVERIFY(Diff::DiffEngine::hashLine("hello") != Diff::DiffEngine::hashLine("world"));
+    QVERIFY(Diff::DiffEngine::hashLine("") != 0);
+    const std::string longLine(4096, 'x');
+    QCOMPARE(Diff::DiffEngine::hashLine(longLine), Diff::DiffEngine::hashLine(longLine));
+    QVERIFY(Diff::DiffEngine::hashLine(longLine) != Diff::DiffEngine::hashLine(longLine + "y"));
+}
+
+// P.7：内容相同、仅位置变化的块应识别为 Moved，且对侧行号正确。
+void TestDiffEngine::movedLinesAreDetected()
+{
+    const std::string textA = "head\nalpha\nbeta\ngamma\ntail\n";
+    const std::string textB = "head\nbeta\ngamma\nalpha\ntail\n";
+    const auto res = Diff::DiffEngine::computeDiff(textA, textB, Diff::DiffOptions{});
+
+    QVERIFY2(res.movedCount >= 1, "应识别出至少一个被移动的块");
+    bool found = false;
+    for (const auto& line : res.lines) {
+        if (line.type == Diff::ChangeType::Moved) {
+            found = true;
+            QVERIFY(line.lineA >= 0 && line.lineB >= 0);
+            QVERIFY(line.movedToLine >= 0);
+        }
+    }
+    QVERIFY(found);
+}
+
+// P.7：detectMoves=false 时不做移动检测。
+void TestDiffEngine::moveDetectionCanBeDisabled()
+{
+    const std::string textA = "head\nalpha\nbeta\ngamma\ntail\n";
+    const std::string textB = "head\nbeta\ngamma\nalpha\ntail\n";
+    Diff::DiffOptions opt;
+    opt.detectMoves = false;
+    const auto res = Diff::DiffEngine::computeDiff(textA, textB, opt);
+    QCOMPARE(res.movedCount, 0);
+}
+
+// P.7：超过阈值的文本必须走工作线程，构造不阻塞，完成后结果完整。
+void TestDiffEngine::asyncDiffDoesNotBlockUi()
+{
+    auto* edA = new EditorView();
+    auto* edB = new EditorView();
+    std::string a;
+    std::string b;
+    a.reserve(2 * 1024 * 1024);
+    b.reserve(2 * 1024 * 1024);
+    for (int i = 0; i < 90000; ++i) {
+        a += "A_" + std::to_string(i) + "_padding_padding_padding\n";
+        b += "B_" + std::to_string(i) + "_padding_padding_padding\n";
+    }
+    edA->setTextFromUtf8(a);
+    edB->setTextFromUtf8(b);
+
+    {
+        CompareWidget cmpWidget(edA, edB);
+        QVERIFY2(cmpWidget.isComputing(), "大文本应走异步路径，构造期间 UI 不阻塞");
+        QTRY_VERIFY_WITH_TIMEOUT(!cmpWidget.isComputing(), 15000);
+        QVERIFY(cmpWidget.totalDiffCount() > 0);
+        QVERIFY(cmpWidget.miniMap()->diffCount() > 0);
+        cmpWidget.clearDiff();
+    }
+    delete edA;
+    delete edB;
+}
+
+// P.7：垂直滚动按 alignment 的文档行映射，而不是照搬滚动条 value。
+void TestDiffEngine::scrollSyncMapsAlignedDocumentLines()
+{
+    auto* edA = new EditorView();
+    auto* edB = new EditorView();
+    edA->setTextFromUtf8("A\nB\nC\n");
+    edB->setTextFromUtf8("A\nINS\nB\nC\n");
+    {
+        CompareWidget cmpWidget(edA, edB);
+        QVERIFY(!cmpWidget.isComputing()); // 小文本同步路径
+        // alignment: 0/0, -1/1(Added), 1/2, 2/3, 3/4(末尾空行)
+        QCOMPARE(cmpWidget.alignedLineBForLineA(0), 0);
+        QCOMPARE(cmpWidget.alignedLineBForLineA(1), 2);
+        QCOMPARE(cmpWidget.alignedLineBForLineA(2), 3);
+        QCOMPARE(cmpWidget.alignedLineAForLineB(2), 1);
+        cmpWidget.clearDiff();
+    }
+    delete edA;
+    delete edB;
+}
+
+// P.7：小地图把点击纵坐标吸附到最近的差异并发出跳转信号。
+void TestDiffEngine::miniMapClickNavigatesToDiff()
+{
+    DiffMiniMap map;
+    map.resize(14, 200);
+
+    Diff::AlignmentList align(20);
+    for (auto& item : align) item.type = Diff::ChangeType::Unchanged;
+    align[7].type = Diff::ChangeType::Modified;
+    align[15].type = Diff::ChangeType::Added;
+    map.setAlignment(align);
+
+    QCOMPARE(map.diffCount(), 2);
+    QCOMPARE(map.indexAtY(0), 7);     // 吸附到最近差异
+    QCOMPARE(map.indexAtY(150), 15);
+
+    QSignalSpy spy(&map, &DiffMiniMap::navigateTo);
+    QVERIFY(spy.isValid());
+    QTest::mouseClick(&map, Qt::LeftButton, Qt::NoModifier, QPoint(7, 150));
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toInt(), 15);
+}
+
+// P.7：选区比对只把选中的文本放进副本视图，不夹带前后缀。
+void TestDiffEngine::selectionCompareUsesSelectedTextOnly()
+{
+    MainWindow win;
+    win.show();
+    auto* tabMgr = win.findChild<TabManager*>();
+    QVERIFY(tabMgr != nullptr);
+    tabMgr->createNewTab();
+
+    auto* ed1 = tabMgr->editorAt(0);
+    auto* ed2 = tabMgr->editorAt(1);
+    QVERIFY(ed1 != nullptr && ed2 != nullptr);
+    ed1->setTextFromUtf8("prefix\nSELECT_A_1\nSELECT_A_2\nsuffix\n");
+    ed2->setTextFromUtf8("prefix\nSELECT_B_1\nSELECT_B_2\nsuffix\n");
+
+    // 选中各自中间两行：[7, 29)
+    ed1->send(SCI_SETSELECTIONSTART, 7);
+    ed1->send(SCI_SETSELECTIONEND, 29);
+    ed2->send(SCI_SETSELECTIONSTART, 7);
+    ed2->send(SCI_SETSELECTIONEND, 29);
+
+    auto* act = win.findChild<QAction*>("actCompareSelection");
+    QVERIFY(act != nullptr);
+    act->trigger();
+
+    auto* cmp = win.findChild<CompareWidget*>();
+    QVERIFY(cmp != nullptr);
+    QCOMPARE(QString::fromStdString(cmp->editorA()->currentTextUtf8()),
+             QStringLiteral("SELECT_A_1\nSELECT_A_2\n"));
+    QCOMPARE(QString::fromStdString(cmp->editorB()->currentTextUtf8()),
+             QStringLiteral("SELECT_B_1\nSELECT_B_2\n"));
+    QVERIFY(cmp->totalDiffCount() > 0);
+}
+
+// P.7：改名后旧配置一次性迁移到 Noda 目录，且不覆盖已有新配置、可重复调用。
+void TestDiffEngine::legacyConfigIsMigratedOnce()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString legacyDir = tmp.path() + QStringLiteral("/Notepad++");
+    QVERIFY(QDir().mkpath(legacyDir));
+
+    QFile conf(legacyDir + QStringLiteral("/Notepad++.conf"));
+    QVERIFY(conf.open(QIODevice::WriteOnly));
+    conf.write("[prefs]\nuiLanguage=zh_CN\n");
+    conf.close();
+    QFile session(legacyDir + QStringLiteral("/session.xml"));
+    QVERIFY(session.open(QIODevice::WriteOnly));
+    session.write("<Noda/>");
+    session.close();
+
+    QVERIFY(ConfigMigration::migrateLegacy(tmp.path()));
+    const QString newConf = tmp.path() + QStringLiteral("/Noda/Noda.conf");
+    QVERIFY(QFile::exists(newConf));
+    QVERIFY(QFile::exists(tmp.path() + QStringLiteral("/Noda/session.xml")));
+    QFile out(newConf);
+    QVERIFY(out.open(QIODevice::ReadOnly));
+    QCOMPARE(out.readAll(), QByteArray("[prefs]\nuiLanguage=zh_CN\n"));
+    out.close();
+
+    // 幂等：已有新配置时不再迁移，也不覆盖用户后来的修改。
+    QVERIFY(!ConfigMigration::migrateLegacy(tmp.path()));
+}
+
+// P.7：Git / SVN 比对入口已接线；未保存文件触发时给出提示且不创建比对视图。
+void TestDiffEngine::vcsCompareActionsAreWired()
+{
+    MainWindow win;
+    win.show();
+    auto* actGit = win.findChild<QAction*>("actCompareGit");
+    auto* actSvn = win.findChild<QAction*>("actCompareSvn");
+    auto* actSelection = win.findChild<QAction*>("actCompareSelection");
+    QVERIFY(actGit != nullptr);
+    QVERIFY(actSvn != nullptr);
+    QVERIFY(actSelection != nullptr);
+
+    // 新建未保存文档：应安全返回，不产生比对视图、不崩溃。
+    actGit->trigger();
+    actSvn->trigger();
+    QVERIFY(win.findChild<CompareWidget*>() == nullptr);
 }

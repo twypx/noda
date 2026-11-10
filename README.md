@@ -52,6 +52,13 @@ and tuned for Linux** — not bolted on through plugins or a compatibility layer
   browser on `Ctrl` + click.
 - **Binary files just work.** Files containing NUL bytes automatically open in the hex viewer,
   showing the true on-disk bytes — not the decoded text buffer.
+- **A diff engine built for large files.** Histogram/Patience anchors + bounded Myers (no O(D²)
+  memory), wyhash-style block hashing, real character-level intra-line ranges, moved-block
+  detection, and async computation via `QtConcurrent` so the UI never freezes.
+- **Comparison beyond two files.** Compare whole documents, selected blocks, or the current file
+  against Git HEAD / SVN BASE (via `QProcess`, zero linked dependencies); click the difference
+  mini-map to jump, and use the alignment-mapped scroll sync that stays correct even with
+  placeholder lines.
 
 ## Core features
 
@@ -74,6 +81,10 @@ and tuned for Linux** — not bolted on through plugins or a compatibility layer
 - [x] Opening a folder: lazy, dependency-free directory tree in a left dock.
 - [x] Built-in hexadecimal / binary viewer with raw on-disk bytes.
 - [x] TypeScript / TSX syntax highlighting.
+- [x] Side-by-side diff: whole files / selection / Git HEAD / SVN BASE, moved blocks,
+      intra-line character highlights, next/prev navigation (`F8` / `Shift+F8`), mini-map.
+- [x] Ignore whitespace / case / EOL options, runtime English ⇄ 简体中文 switching,
+      one-time migration of legacy settings after the rename.
 
 ## Quick start
 
@@ -83,7 +94,7 @@ sudo apt install -y build-essential cmake qt6-base-dev qt6-base-dev-tools
 
 cd npp-linux
 ./build.sh
-./build/notepad-plus-plus-linux
+./build/noda
 ```
 
 Package as a `.deb`:
@@ -91,7 +102,7 @@ Package as a `.deb`:
 ```bash
 cd npp-linux
 ./build_deb.sh
-sudo apt install ./build-deb/notepad-plus-plus-linux_*_amd64.deb
+sudo apt install ./build-deb/noda_*_amd64.deb
 ```
 
 Toolbar and application icons are generated offline by `npp-linux/tools/*.py` and embedded as
@@ -110,6 +121,13 @@ This repository vendors every third-party source needed to build, so the directo
 | `PowerEditor/src/uchardet/` | Upstream (vendored) | Charset auto-detection |
 | `PowerEditor/src/pugixml/` | Upstream (vendored) | XML parsing for language/style models |
 | `PowerEditor/src/langs.model.xml`<br>`PowerEditor/src/stylers.model.xml` | Upstream (vendored) | Language and theme definitions, reused verbatim |
+
+## Documentation
+
+- English technical reference: **[npp-linux/README.md](npp-linux/README.md)** (default)
+- 完整中文技术文档: **[docs/README.technical.zh-CN.md](docs/README.technical.zh-CN.md)**
+- Development plan & module log: **[docs/开发计划2.md](docs/开发计划2.md)**
+- 简体中文产品说明: **[docs/README.zh-CN.md](docs/README.zh-CN.md)**
 
 ## License
 

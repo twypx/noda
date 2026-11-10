@@ -3,13 +3,14 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <string>
 
 namespace Diff {
 
 namespace {
 
-constexpr uint64_t kHashBasis = 14695981039346656037ULL;
-constexpr uint64_t kHashPrime = 1099511628211ULL;
+constexpr uint64_t kHashSeed = 0x9e3779b97f4a7c15ULL;
+constexpr uint64_t kHashMul = 0xc2b2ae3d27d4eb4fULL;
 
 // 有界 Myers 的编辑距离上限：超出即退化为整块替换。
 // trace 内存为 O(kMaxMyersD^2) ≈ 4MB，保证最坏情况下也不会 OOM。
@@ -27,20 +28,61 @@ inline bool isWhitespace(unsigned char c) {
     return c == ' ' || c == '\t' || c == '\r' || c == '\n';
 }
 
-uint64_t computeLineHash(std::string_view line, const DiffOptions& options) {
-    uint64_t h = kHashBasis;
-    if (!options.ignoreWhitespace && !options.ignoreCase) {
-        for (const unsigned char c : line) {
-            h = (h ^ c) * kHashPrime;
-        }
-        return h;
+// 128 位乘混合：wyhash 的核心运算。无 __int128 的平台退化为 64 位拆分乘。
+inline uint64_t wideMulMix(uint64_t a, uint64_t b) {
+#if defined(__SIZEOF_INT128__)
+    const __uint128_t r = static_cast<__uint128_t>(a) * static_cast<__uint128_t>(b);
+    return static_cast<uint64_t>(r) ^ static_cast<uint64_t>(r >> 64);
+#else
+    const uint64_t al = static_cast<uint32_t>(a), ah = a >> 32;
+    const uint64_t bl = static_cast<uint32_t>(b), bh = b >> 32;
+    const uint64_t p0 = al * bl, p1 = al * bh, p2 = ah * bl, p3 = ah * bh;
+    const uint64_t mid = (p0 >> 32) + static_cast<uint32_t>(p1) + static_cast<uint32_t>(p2);
+    return (p0 & 0xffffffffULL) | (mid << 32) ^ (p3 + (p1 >> 32) + (p2 >> 32) + (mid >> 32));
+#endif
+}
+
+inline uint64_t avalanche(uint64_t x) {
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdULL;
+    x ^= x >> 33;
+    x *= 0xc4ceb9fe1a85ec53ULL;
+    x ^= x >> 33;
+    return x;
+}
+
+// wyhash 风格：8 字节块读 + 128 位乘混合，吞吐为逐字节 FNV 的数倍。
+// 尾部不足 8 字节一次性读入零填充的 64 位字，无分支逐字节循环。
+uint64_t fastHash(const void* key, size_t len) {
+    const auto* p = static_cast<const unsigned char*>(key);
+    uint64_t h = kHashSeed ^ (static_cast<uint64_t>(len) * kHashMul);
+    size_t i = 0;
+    for (; i + 8 <= len; i += 8) {
+        uint64_t k;
+        std::memcpy(&k, p + i, 8);
+        h = wideMulMix(h ^ k, kHashMul);
     }
+    if (i < len) {
+        uint64_t tail = 0;
+        std::memcpy(&tail, p + i, len - i);
+        h = wideMulMix(h ^ tail, kHashSeed);
+    }
+    return avalanche(h);
+}
+
+// 常规路径零分配；仅当启用忽略选项时才构造规范化临时串。
+uint64_t computeLineHash(std::string_view line, const DiffOptions& options) {
+    if (!options.ignoreWhitespace && !options.ignoreCase) {
+        return fastHash(line.data(), line.size());
+    }
+    std::string normalized;
+    normalized.reserve(line.size());
     for (unsigned char c : line) {
         if (options.ignoreWhitespace && isWhitespace(c)) continue;
         if (options.ignoreCase && c >= 'A' && c <= 'Z') c = static_cast<unsigned char>(c + ('a' - 'A'));
-        h = (h ^ c) * kHashPrime;
+        normalized.push_back(static_cast<char>(c));
     }
-    return h;
+    return fastHash(normalized.data(), normalized.size());
 }
 
 bool linesEqual(std::string_view a, std::string_view b, const DiffOptions& options) {
@@ -417,6 +459,66 @@ bool charMyers(std::string_view a, std::string_view b, bool ignoreCase,
 
 } // namespace
 
+uint64_t DiffEngine::hashLine(std::string_view line, const DiffOptions& options) {
+    return computeLineHash(line, options);
+}
+
+// P.7：把「内容相同、仅位置变化」的 Removed/Added 行配对为 Moved。
+// 用已规范化的行哈希排序分组（连续数组，无哈希节点分配），配对前再做一次真实内容比较防碰撞。
+void detectMovedLines(const std::vector<LineToken>& tokensA, const std::vector<LineToken>& tokensB,
+                      const DiffOptions& options, DiffResult& result) {
+    struct Candidate {
+        uint64_t hash;
+        size_t index;
+        bool isA;
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(static_cast<size_t>(result.addedCount + result.removedCount));
+    for (size_t i = 0; i < result.lines.size(); ++i) {
+        const LineDiff& line = result.lines[i];
+        if (line.type == ChangeType::Removed && line.lineA >= 0) {
+            candidates.push_back(Candidate{tokensA[static_cast<size_t>(line.lineA)].hash, i, true});
+        } else if (line.type == ChangeType::Added && line.lineB >= 0) {
+            candidates.push_back(Candidate{tokensB[static_cast<size_t>(line.lineB)].hash, i, false});
+        }
+    }
+    if (candidates.size() < 2) return;
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const Candidate& x, const Candidate& y) { return x.hash < y.hash; });
+
+    int moved = 0;
+    size_t i = 0;
+    while (i < candidates.size()) {
+        size_t j = i;
+        while (j < candidates.size() && candidates[j].hash == candidates[i].hash) ++j;
+        std::vector<size_t> fromA;
+        std::vector<size_t> fromB;
+        for (size_t k = i; k < j; ++k) {
+            (candidates[k].isA ? fromA : fromB).push_back(candidates[k].index);
+        }
+        const size_t pairs = std::min(fromA.size(), fromB.size());
+        for (size_t p = 0; p < pairs; ++p) {
+            LineDiff& left = result.lines[fromA[p]];
+            LineDiff& right = result.lines[fromB[p]];
+            if (!linesEqual(tokensA[static_cast<size_t>(left.lineA)].rawText,
+                            tokensB[static_cast<size_t>(right.lineB)].rawText, options)) {
+                continue;
+            }
+            left.type = ChangeType::Moved;
+            left.lineB = right.lineB;
+            left.movedToLine = right.lineB;
+            right.consumed = true; // 对侧项不再产生对齐行/绘制
+            ++moved;
+        }
+        i = j;
+    }
+
+    result.movedCount += moved;
+    result.addedCount -= moved;
+    result.removedCount -= moved;
+}
+
 std::vector<LineToken> DiffEngine::tokenize(std::string_view text, const DiffOptions& options) {
     std::vector<LineToken> tokens;
     // 与 Scintilla 行数语义保持一致：行数 = '\n' 个数 + 1（末尾换行后还有一空行）。
@@ -571,6 +673,9 @@ DiffResult DiffEngine::computeDiff(std::string_view textA, std::string_view text
         i = addedEnd;
     }
 
+    if (options.detectMoves) {
+        detectMovedLines(tokensA, tokensB, options, result);
+    }
     return result;
 }
 
@@ -581,9 +686,11 @@ AlignmentList DiffEngine::computeAlignment(const DiffResult& diff, int totalLine
     int coveredA = 0;
     int coveredB = 0;
     for (const auto& item : diff.lines) {
+        if (item.consumed) continue;
         switch (item.type) {
         case ChangeType::Unchanged:
         case ChangeType::Modified:
+        case ChangeType::Moved:
             align.push_back(AlignmentItem{item.lineA, item.lineB, item.type});
             if (item.lineA >= 0) coveredA = std::max(coveredA, item.lineA + 1);
             if (item.lineB >= 0) coveredB = std::max(coveredB, item.lineB + 1);

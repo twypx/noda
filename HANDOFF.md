@@ -1,7 +1,7 @@
 # HANDOFF — Noda 开发交接
 
 > 原交接基于 `481409a`；当前基线为远程 `origin/master` = `dec7c62`（v1.0.8）。
-> 本轮「半成品与静默失败治理」的改动**尚未提交**；若 HEAD 已变动，请以代码与 `npp-linux/README.md` 为准。
+> 本轮「半成品与静默失败治理」的改动**尚未提交**；若 HEAD 已变动，请以代码与英文技术文档 `npp-linux/README.md` 为准，完整中文版见 `docs/README.technical.zh-CN.md`。
 
 ## 0. 先确认你在哪
 
@@ -103,9 +103,11 @@ v1.0.7 / v1.0.8 已提交：拖拽文件到窗口打开、透明抠图图标重�
 
 模块 P（文件比对，尚未提交）：原实现存在 O(D²) 内存、抢占 TabManager 页面、行内差异只算前后缀等问题；已整改为 Histogram 锚点 + 有界 Myers、字符级行内 diff、`currentTextView()` 零拷贝、独立只读副本比对、16MB 护栏，并新增忽略空白/大小写选项。详见 `docs/开发计划2.md` 模块 P.6。
 
+模块 P.7（所有未落地项收口，尚未提交）：wyhash 风格块哈希、Moved 块检测（含开关）、选区比对、`QProcess` 版 Git HEAD / SVN BASE 比对（零链接依赖）、`QtConcurrent` 异步比对 + 「正在比对…」状态、按 alignment 文档行映射的垂直滚动同步（消除 annotation 占位漂移）、`DiffMiniMap` 差异分布小地图；改名收尾：启动时一次性迁移 `~/.config/Notepad++` → `~/.config/Noda`（幂等、不覆盖）、hicolor 启动器图标同步到新手绘图案；文档双语收口：`npp-linux/README.md` 改为英文默认技术文档，完整中文版迁至 `docs/README.technical.zh-CN.md`，两版落地页修正旧二进制名并补文档导航。详见 `docs/开发计划2.md` 模块 P.7。
+
 模块 O（英文界面本地化补全，尚未提交）：修复英文模式下菜单/工具栏 tooltip/设置项/状态栏残留中文。做法：语言下拉改用原生名称（简体中文 / English）并标记 `nppNoL10n` 不翻译；`extraDictionary` 增补约 100 条（工具栏/菜单动作、折叠与格式层次、编码子菜单、查找替换、状态栏模板、URL 链接）；新增 `translateTooltip()` 处理「名称 (Ctrl+X)」形式；状态栏改为运行期按语言拼接并加 `languageChanged` 信号刷新。验收测试 `tests/test_localization.cpp` 在主窗口与设置对话框上断言 0 处中文。
 
-细节与设计意图见 `npp-linux/README.md`，那里每节都写了「为什么这么做」。
+细节与设计意图见完整中文技术文档 `docs/README.technical.zh-CN.md`（每节都写了「为什么这么做」），英文技术文档为 `npp-linux/README.md`。
 
 ## 6. 源码里值得先读的几处
 

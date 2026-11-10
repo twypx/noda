@@ -4,8 +4,10 @@
 #include "utils/StartupNotify.h"
 #include "utils/SingleInstance.h"
 #include "utils/LocalizationManager.h"
+#include "utils/ConfigMigration.h"
 #include <QDir>
 #include <QIcon>
+#include <QStandardPaths>
 #include <QMessageBox>
 #include <QString>
 #include <iostream>
@@ -42,6 +44,10 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("Noda"));
     app.setOrganizationName(QStringLiteral("Noda"));
+
+    // 改名后的一次性配置迁移：必须在任何 QSettings 读取（MainWindow 构造）之前。
+    ConfigMigration::migrateLegacy(
+        QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation));
 
     // 上游 nativeLang（中文/英文）资源 + 全局控件翻译过滤器。
     LocalizationManager::instance().initialize(&app);

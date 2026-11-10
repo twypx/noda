@@ -10,7 +10,8 @@ enum class ChangeType {
     Unchanged,
     Added,
     Removed,
-    Modified
+    Modified,
+    Moved   // 内容相同、仅位置变化（P.7）
 };
 
 struct CharRange {
@@ -22,6 +23,8 @@ struct LineDiff {
     ChangeType type = ChangeType::Unchanged;
     int lineA = -1; // 0-based
     int lineB = -1; // 0-based
+    int movedToLine = -1; // Moved：对侧对应行号
+    bool consumed = false; // 已被 Moved 配对消费，不参与对齐/绘制
     std::vector<CharRange> intraA;
     std::vector<CharRange> intraB;
 };
@@ -30,6 +33,7 @@ struct DiffOptions {
     bool ignoreWhitespace = false;
     bool ignoreCase = false;
     bool ignoreEol = true;
+    bool detectMoves = true; // 检测「内容相同、仅位置变化」的块
 };
 
 struct DiffResult {
@@ -37,6 +41,7 @@ struct DiffResult {
     int addedCount = 0;
     int removedCount = 0;
     int modifiedCount = 0;
+    int movedCount = 0;
 };
 
 struct AlignmentItem {
@@ -69,6 +74,10 @@ public:
 
     // 零拷贝行扫描与 64 位极速哈希提取
     static std::vector<LineToken> tokenize(std::string_view text, const DiffOptions& options);
+
+    // wyhash：8 字节块读 + 128 位乘混合，逐字节 FNV 的数倍吞吐。
+    // 忽略选项开启时才构造规范化临时串，常规路径零分配。
+    static uint64_t hashLine(std::string_view line, const DiffOptions& options = {});
 };
 
 } // namespace Diff

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="resources/icons/app_256.png" width="88" alt="Noda LOGO">
+  <img src="../npp-linux/resources/icons/app_256.png" width="88" alt="Noda LOGO">
 </p>
 
-> **Noda 技术文档（中文）** · English: [../README.md](../README.md) · 简体中文: [../docs/README.zh-CN.md](../docs/README.zh-CN.md)
+> **Noda 技术文档 · 中文完整版** · English (technical): [../npp-linux/README.md](../npp-linux/README.md) · 产品首页：[../README.md](../README.md) / [README.zh-CN.md](README.zh-CN.md)
 >
 > Noda 是基于 Notepad++ 源码的独立修改（GPL-3.0），与 Notepad++ 及其作者无隶属或背书关系。
 
@@ -63,7 +63,7 @@ cd npp-linux
 ./build.sh
 
 # 运行
-./build/notepad-plus-plus-linux
+./build/noda
 ```
 
 ## 打包成 deb
@@ -72,20 +72,20 @@ cd npp-linux
 ./build_deb.sh
 
 # 安装（用 apt 而不是 dpkg -i，缺依赖时会自动补齐）
-sudo apt install ./build-deb/notepad-plus-plus-linux_1.0.8-1_amd64.deb
+sudo apt install ./build-deb/noda_1.0.8-1_amd64.deb
 ```
 
-产物为 `build-deb/notepad-plus-plus-linux_<版本>-1_<架构>.deb`（约 2.7 MB），按 Debian 政策装到标准位置：
+产物为 `build-deb/noda_<版本>-1_<架构>.deb`（约 2.7 MB），按 Debian 政策装到标准位置：
 
 | 路径 | 内容 |
 |---|---|
-| `/usr/bin/notepad-plus-plus-linux` | 可执行文件 |
-| `/usr/share/notepad-plus-plus-linux/` | `langs.model.xml`、`stylers.model.xml` |
+| `/usr/bin/noda` | 可执行文件 |
+| `/usr/share/noda/` | `langs.model.xml`、`stylers.model.xml` |
 | `/usr/share/applications/*.desktop` | 桌面入口，应用列表可直接搜到 |
 | `/usr/share/icons/hicolor/*/apps/` | 13 种尺寸图标 |
-| `/usr/share/doc/notepad-plus-plus-linux/copyright` | 许可声明 |
+| `/usr/share/doc/noda/copyright` | 许可声明 |
 
-卸载：`sudo apt remove notepad-plus-plus-linux`。
+卸载：`sudo apt remove noda`。
 
 几个打包细节（改 `CMakeLists.txt` 的 CPack 段前值得先看）：
 
@@ -96,7 +96,7 @@ sudo apt install ./build-deb/notepad-plus-plus-linux_1.0.8-1_amd64.deb
 - **必须用 `-DCMAKE_INSTALL_PREFIX=/usr`**：`.desktop` 里的 `Exec` 在 configure 阶段就被固化成
   `${CMAKE_INSTALL_FULL_BINDIR}` 的绝对路径，沿用 CMake 默认的 `/usr/local` 会打出
   `Exec=/usr/local/bin/...` 而文件实际装在 `/usr/bin`，装完点图标没反应。`build_deb.sh` 已处理。
-- **XML 装在 `share` 而不是 `bin`**：`main.cpp` 按 `applicationDirPath()/../share/notepad-plus-plus-linux`
+- **XML 装在 `share` 而不是 `bin`**：`main.cpp` 按 `applicationDirPath()/../share/noda`
   相对推导，所以 `/usr`、`/usr/local`、甚至把 deb 解包到临时目录后直接运行都能命中，不依赖编译期绝对路径。
 
 ### 「打开方式」里看不到本应用？
@@ -153,9 +153,10 @@ tools/register_open_with.py --remove    # 撤销
 选 `PropertyChangeMask|SubstructureNotifyMask` 收启动通知消息，`xtrace.c`/`xcbtrace.c` 用
 `LD_PRELOAD` 分别拦 Xlib 与 libxcb 的发送）：
 
-* **id 必须带引号。** Qt 其实自己发过一条 `remove`，但写成不带引号的 `ID=<id>`；我们的 id 是
-  `gnome-shell/Notepad++ (Linux)/...`（中间那段取自 .desktop 的 `Name`，**带空格**），解析器
-  读到空格就截断，这条通知于是指向一个不存在的序列，等于没发。GTK 是带引号发的，所以没事。
+* **id 必须带引号。** Qt 其实自己发过一条 `remove`，但写成不带引号的 `ID=<id>`；id 形如
+  `gnome-shell/<Name>/...`（中间那段取自 .desktop 的 `Name`）。历史上 `Name` 含空格时解析器
+  读到空格就截断，这条通知于是指向一个不存在的序列，等于没发。当前 `Name=Noda` 无空格，
+  但仍保留引号写法以兼容用户自定义名称。GTK 是带引号发的，所以没事。
 * **发完必须强制一次往返再断开连接。** 只 `xcb_flush()` 然后 `xcb_disconnect()` 的话，这几笔
   `send_event` 实测根本没到达服务器（同一个二进制，加上一次往返立刻就能在 root 上收到）。
 
@@ -170,9 +171,9 @@ tools/register_open_with.py --remove    # 撤销
 
 改完实测忙光标只持续 350ms 左右（改前 15600ms），转圈期间关应用再点图标也能立刻开起来。
 
-另一个必要的配套是桌面文件里的 `StartupWMClass=Notepad++`：窗口的
-`WM_CLASS` 是 `"notepad-plus-plus-linux", "Notepad++"`，第二段来自
-`main.cpp` 的 `setApplicationName("Notepad++")`，与桌面文件名对不上；GNOME 用
+另一个必要的配套是桌面文件里的 `StartupWMClass=Noda`：窗口的
+`WM_CLASS` 是 `"noda", "Noda"`，第二段来自
+`main.cpp` 的 `setApplicationName("Noda")`，与桌面文件名一致；GNOME 用
 `StartupWMClass` 来决定窗口归到哪个应用，这关系到图标合并与分组。改完必须重新安装
 桌面项才生效（用户级 `./install_desktop.sh` 优先级高于包里的 `/usr/share`）。
 
@@ -209,8 +210,8 @@ xwininfo -id <弹出窗口 id> -stats | grep Depth        # 期望 32
 
 | 位置 | 作用 |
 | --- | --- |
-| `~/.config/Notepad++/session.xml` | 记录打开了哪些文件、每个标签的 `startPos/endPos/firstVisibleLine/lang/encoding/eolMode/userReadOnly/backupFilePath`；结构与上游 session.xml 同构 |
-| `~/.config/Notepad++/backup/<标签名>@<YYYY-MM-DD_HHMMSS>` | 未保存内容的快照，统一以 UTF-8 存放 |
+| `~/.config/Noda/session.xml` | 记录打开了哪些文件、每个标签的 `startPos/endPos/firstVisibleLine/lang/encoding/eolMode/userReadOnly/backupFilePath`；结构与上游 session.xml 同构 |
+| `~/.config/Noda/backup/<标签名>@<YYYY-MM-DD_HHMMSS>` | 未保存内容的快照，统一以 UTF-8 存放 |
 
 工作流程：
 
@@ -278,7 +279,7 @@ dry-run 下自动改写的版本号会留在工作区但不提交，正式发版
 - `resources/icons/app_{16,24,32,48,64,128,256}.png` —— 经 `resources/app.qrc` 内嵌进可执行文件，
   运行时由 `main.cpp` 设为窗口图标，并由 `TitleBar` 以 20px 显示在标题栏最左侧（菜单栏“文件”的左边），
   不依赖系统 QtSvg 开发包。
-- `resources/icons/hicolor/{16x16 … 512x512,scalable}/apps/notepad-plus-plus-linux.png` —— 系统图标主题用。
+- `resources/icons/hicolor/{16x16 … 512x512,scalable}/apps/noda.png` —— 系统图标主题用。
 
 重新生成（修改了源图或想调风格时）：
 
@@ -293,10 +294,10 @@ python3 tools/gen_icons.py
 
 ```bash
 ./install_desktop.sh                       # 默认使用 build/ 或 /usr/local/bin 下的可执行文件
-./install_desktop.sh /opt/npp/notepad-plus-plus-linux   # 也可显式指定路径
+./install_desktop.sh /opt/npp/noda   # 也可显式指定路径
 ```
 
-`sudo make install` 时会一并安装 hicolor 图标与 `notepad-plus-plus-linux.desktop`。
+`sudo make install` 时会一并安装 hicolor 图标与 `noda.desktop`。
 
 > 标题栏中间不再绘制文件名。当前打开的文件依靠 `MainWindow::syncWindowTitle()` 写入窗口标题，
 > GNOME/KDE 任务栏悬停时读的就是这个标题，因此鼠标移到任务栏上仍能看到完整文件名。
@@ -422,7 +423,7 @@ cd npp-linux
 
 - 框架：Qt6 Test + CTest，单个可执行文件 `npp_tests`，`tests/test_main.cpp` 依次运行各测试类。
 - 隔离：`QT_QPA_PLATFORM=offscreen`；`XDG_CONFIG_HOME` 指向 `build/test-config` 并在每次运行前清空，
-  所以 `QSettings` 不会碰到 `~/.config/Notepad++/Notepad++.conf`。
+  所以 `QSettings` 不会碰到 `~/.config/Noda/Noda.conf`。
 - `TestV108Baseline` 专门锁住 v1.0.7 / v1.0.8 的 AStyle / JSON 格式化与拖放能力，任何改造都不能让它变红。
 - 覆盖：编码转换与失败语义、保存/拷贝另存为事务性、保存失败提示、配置定位与载入报告、
   样式覆盖序列化与旧格式兼容、样式配置器 UI、快捷键收集/冲突/持久化、折叠幂等与菜单接线、

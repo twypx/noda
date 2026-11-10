@@ -224,6 +224,9 @@ private slots:
 
     // 文件对比
     void onCompareFiles();
+    void onCompareSelection();
+    void onCompareGitHead();
+    void onCompareSvnBase();
     void onCloseCompare();
     void onNextDiff();
     void onPrevDiff();
@@ -234,6 +237,12 @@ private slots:
     void onFileChangedOnDisk(const QString& path);
 
 private:
+    // 用独立只读副本创建并展示双栏比对视图；文件/选区/VCS 三种入口共用。
+    bool createCompareView(const std::string& textA, const std::string& textB,
+                           const std::string& langA, const std::string& langB);
+    // 通过 QProcess 调系统 git / svn 读取版本内容，零链接依赖。
+    static QString vcsContent(const QString& filePath, bool git);
+    void compareWithVcs(bool git);
     // 标签右键菜单的弹出入口；菜单项全部通过 createTabContextMenu() 构建。
     void showTabContextMenu(int index, const QPoint& globalPos);
 
@@ -339,6 +348,9 @@ private:
     QAction* _actAbout{nullptr};
     QAction* _actViewHex{nullptr};
     QAction* _actCompare{nullptr};
+    QAction* _actCompareSelection{nullptr};
+    QAction* _actCompareGit{nullptr};
+    QAction* _actCompareSvn{nullptr};
     QAction* _actClearCompare{nullptr};
     QAction* _actNextDiff{nullptr};
     QAction* _actPrevDiff{nullptr};

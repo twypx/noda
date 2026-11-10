@@ -19,4 +19,15 @@ private slots:
     void compareWidgetRendersMarkersAndAnnotations();
     void compareWidgetIgnoreOptions();
     void mainWindowCompareActions();
+    // P.7：极速哈希 / 块移动
+    void wyhashIsDeterministicAndDispersive();
+    void movedLinesAreDetected();
+    void moveDetectionCanBeDisabled();
+    // P.7：异步 / 滚动映射 / 小地图
+    void asyncDiffDoesNotBlockUi();
+    void scrollSyncMapsAlignedDocumentLines();
+    void miniMapClickNavigatesToDiff();
+    void selectionCompareUsesSelectedTextOnly();
+    void legacyConfigIsMigratedOnce();
+    void vcsCompareActionsAreWired();
 };

@@ -654,6 +654,20 @@ std::string EditorView::currentTextUtf8() const {
     return buf;
 }
 
+std::string EditorView::selectedTextUtf8() const {
+    auto* self = const_cast<EditorView*>(this);
+    const sptr_t start = self->send(SCI_GETSELECTIONSTART);
+    const sptr_t end = self->send(SCI_GETSELECTIONEND);
+    if (end <= start) return currentTextUtf8();
+    const sptr_t textLength = self->send(SCI_GETSELTEXT, 0, 0);
+    if (textLength <= 0) return std::string();
+    std::string selected(static_cast<size_t>(textLength) + 1, '\0');
+    self->send(SCI_GETSELTEXT, static_cast<uptr_t>(textLength + 1),
+               reinterpret_cast<sptr_t>(selected.data()));
+    selected.resize(static_cast<size_t>(textLength));
+    return selected;
+}
+
 std::string_view EditorView::currentTextView() const {
     auto* self = const_cast<EditorView*>(this);
     const sptr_t len = self->send(SCI_GETLENGTH);
