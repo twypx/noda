@@ -147,7 +147,7 @@ void TestConfig::locateConfigFilesFindsKnownLayouts() {
 
     QFile::remove(bin + "/langs.model.xml");
     QFile::remove(bin + "/stylers.model.xml");
-    const QString share = dir.filePath("share/notepad-plus-plus-linux");
+    const QString share = dir.filePath("share/noda");
     QVERIFY(QDir().mkpath(share));
     QVERIFY(put(share + "/langs.model.xml", ""));
     QVERIFY(put(share + "/stylers.model.xml", ""));

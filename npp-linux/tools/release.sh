@@ -136,7 +136,7 @@ elif [[ $DRY_RUN -eq 1 ]]; then
     # dry-run 不改动仓库状态：只报告将要做什么
     echo ">>> [dry-run] 将创建 tag ${TAG}"
 else
-    git tag -a "${TAG}" -m "Notepad++ Linux Port ${TAG}"
+    git tag -a "${TAG}" -m "Noda ${TAG}"
     echo ">>> 已创建 tag ${TAG}"
 fi
 
@@ -193,7 +193,7 @@ else
     RESP="$(curl -sS -X POST "${API}/releases" \
         --data-urlencode "access_token=${GITEE_TOKEN}" \
         --data-urlencode "tag_name=${TAG}" \
-        --data-urlencode "name=Notepad++ Linux Port ${TAG}" \
+        --data-urlencode "name=Noda ${TAG}" \
         --data-urlencode "body=${BODY}" \
         --data-urlencode "target_commitish=master" \
         --data-urlencode "prerelease=false")"

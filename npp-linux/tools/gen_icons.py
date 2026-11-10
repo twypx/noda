@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""从 notepad++_cutout.png 生成透明背景的应用图标。
+"""从 noda_cutout.png 生成透明背景的应用图标。
 
 源图是 RGBA 透明抠图，图标主体就是纸面与变色龙本身。为保证任务栏/启动器
 小尺寸清晰：先裁掉透明边距，再让每个目标尺寸直接从源图 LANCZOS 缩放
@@ -27,6 +27,8 @@ ALPHA_TRIM_THRESHOLD = 16  # 低于此 alpha 的边距/软阴影不计入内容�
 UNSHARP_PERCENT = 120      # 轻度锐化强度，避免小尺寸出现明显白边
 UNSHARP_THRESHOLD = 2
 
+# 注意：20 / 40 是为标题栏 1x / 2x 手工调优并单独提供的原生尺寸，
+# 若从 1024 母图重采样会覆盖手绘细节，故不纳入自动生成列表。
 QRC_SIZES = [16, 24, 32, 48, 64, 128, 256]
 THEME_SIZES = [16, 22, 24, 32, 48, 64, 96, 128, 192, 256, 512]
 
@@ -53,10 +55,10 @@ def main() -> int:
     here = os.path.dirname(os.path.abspath(__file__))
     root = os.path.dirname(here)
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", default=os.path.join(root, "notepad++_cutout.png"))
+    ap.add_argument("--src", default=os.path.join(root, "noda_cutout.png"))
     ap.add_argument("--qrc-dir", default=os.path.join(root, "resources", "icons"))
     ap.add_argument("--theme-dir", default=os.path.join(root, "resources", "icons"))
-    ap.add_argument("--icon-name", default="notepad-plus-plus-linux")
+    ap.add_argument("--icon-name", default="noda")
     args = ap.parse_args()
 
     if not os.path.exists(args.src):

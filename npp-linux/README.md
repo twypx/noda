@@ -1,10 +1,12 @@
 <p align="center">
-  <img src="resources/icons/app_256.png" width="88" alt="Notepad++ for Linux LOGO">
+  <img src="resources/icons/app_256.png" width="88" alt="Noda LOGO">
 </p>
 
-> **详细技术文档（中文）** · English: [../README.md](../README.md) · 简体中文: [../docs/README.zh-CN.md](../docs/README.zh-CN.md)
+> **Noda 技术文档（中文）** · English: [../README.md](../README.md) · 简体中文: [../docs/README.zh-CN.md](../docs/README.zh-CN.md)
+>
+> Noda 是基于 Notepad++ 源码的独立修改（GPL-3.0），与 Notepad++ 及其作者无隶属或背书关系。
 
-# Notepad++ Linux 移植（Qt6 / Widgets 原生）— 技术细节
+# Noda 技术文档（Qt6 / Widgets 原生）
 
 基于 Notepad++ 核心资产与逻辑改造的 Linux 原生高性能实现。
 

@@ -43,9 +43,8 @@ TitleBar::TitleBar(QWidget* parent)
     QIcon icon = window() ? window()->windowIcon() : QIcon();
     if (icon.isNull()) icon = QApplication::windowIcon(); // 兼容只设了 QApplication 级图标的情况
     if (!icon.isNull()) {
-        // 按屏幕 DPR 取够物理像素的那一张：setScaledContents(true) 会把 pixmap 直接铺满
-        // 20x20 的逻辑盒，2x 屏上那就是 40x40 物理像素。直接 icon.pixmap(20, 20) 拿到的是
-        // DPR=1 的 20px 图，铺过去等于放大一倍，图标边缘发糊。
+        // 图标集内嵌了原生 20px（1x）与 40px（2x）两套：按 DPR 请求对应物理像素即可精确命中，
+        // 不再从 24/48 缩放，边缘保持锐利。setScaledContents(true) 负责铺满 20x20 逻辑盒。
         const qreal dpr = _iconLabel->devicePixelRatio();
         QPixmap p = icon.pixmap(QSize(qRound(20 * dpr), qRound(20 * dpr)));
         p.setDevicePixelRatio(dpr);

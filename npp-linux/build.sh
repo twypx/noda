@@ -4,7 +4,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
 
-echo "=== Notepad++ Linux Port 一键构建脚本 ==="
+echo "=== Noda 一键构建脚本 ==="
 
 # 检查 cmake
 if ! command -v cmake &> /dev/null; then
@@ -21,4 +21,4 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 echo ">>> 开始多线程编译..."
 cmake --build . -- -j$(nproc)
 
-echo "=== 构建成功！执行程序位于: ${BUILD_DIR}/notepad-plus-plus-linux ==="
+echo "=== 构建成功！执行程序位于: ${BUILD_DIR}/noda ==="

@@ -219,7 +219,8 @@ const QHash<QString, QString>& extraDictionary() {
         {QStringLiteral("首选项(&P)..."), QStringLiteral("&Preferences...")},
         {QStringLiteral("语言样式配置器(&S)..."), QStringLiteral("Style &Configurator...")},
         {QStringLiteral("快捷键映射器(&K)..."), QStringLiteral("Shortcut &Mapper...")},
-        {QStringLiteral("关于 Notepad++(&A)..."), QStringLiteral("&About Notepad++...")},
+        {QStringLiteral("关于 Noda(&A)..."), QStringLiteral("&About Noda...")},
+        {QStringLiteral("关于 Noda"), QStringLiteral("About Noda")},
 
         {QStringLiteral("保存"), QStringLiteral("Save")},
         {QStringLiteral("另存为"), QStringLiteral("Save As")},
@@ -395,7 +396,7 @@ void LocalizationManager::loadDictionaries() {
     const QString appDir = QCoreApplication::applicationDirPath();
     const QStringList dirs = {
         appDir + QStringLiteral("/nativeLang"),
-        appDir + QStringLiteral("/../share/notepad-plus-plus-linux/nativeLang"),
+        appDir + QStringLiteral("/../share/noda/nativeLang"),
         appDir + QStringLiteral("/../nativeLang"),
         QStringLiteral("./nativeLang"),
     };

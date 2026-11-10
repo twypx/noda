@@ -13,7 +13,7 @@ class QWidget;
 // libstartup-notification），不属于窗口管理器。启动器在等应用侧的完成通知。
 //
 // Qt 其实自己发过一条完成通知，但它把 id 写成不带引号的 `ID=<id>`：我们的 id 是
-// `gnome-shell/Notepad++ (Linux)/...`（中间那段取自 .desktop 的 Name，**带空格**），
+// `gnome-shell/Noda/...`（中间那段取自 .desktop 的 Name），
 // 解析器读到空格就截断，于是这条通知指向一个不存在的序列，等于没发。
 // GTK 程序（对照实测 207ms 就结束转圈的 gedit）是带引号发的，所以没事。
 //

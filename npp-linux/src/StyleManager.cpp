@@ -70,7 +70,7 @@ ConfigPaths StyleManager::locateConfigFiles(const std::string& appDir) {
     ConfigPaths paths;
     const std::vector<std::string> langs = {
         appDir + "/langs.model.xml",
-        appDir + "/../share/notepad-plus-plus-linux/langs.model.xml",
+        appDir + "/../share/noda/langs.model.xml",
         appDir + "/../../PowerEditor/src/langs.model.xml",
         appDir + "/../PowerEditor/src/langs.model.xml",
         "./PowerEditor/src/langs.model.xml",
@@ -78,7 +78,7 @@ ConfigPaths StyleManager::locateConfigFiles(const std::string& appDir) {
     };
     const std::vector<std::string> stylers = {
         appDir + "/stylers.model.xml",
-        appDir + "/../share/notepad-plus-plus-linux/stylers.model.xml",
+        appDir + "/../share/noda/stylers.model.xml",
         appDir + "/../../PowerEditor/src/stylers.model.xml",
         appDir + "/../PowerEditor/src/stylers.model.xml",
         "./PowerEditor/src/stylers.model.xml",
@@ -118,7 +118,7 @@ std::string StyleManager::buildDiagnostic(const ConfigPaths& paths,
         os << "\n已搜索路径：\n";
         for (const auto& s : paths.searched) os << "  " << s << "\n";
     }
-    os << "\n完整安装时这两个 XML 位于 <prefix>/share/notepad-plus-plus-linux/，"
+    os << "\n完整安装时这两个 XML 位于 <prefix>/share/noda/，"
           "源码树中位于 PowerEditor/src/。";
     return os.str();
 }
@@ -233,11 +233,11 @@ ConfigLoadReport StyleManager::loadConfigs(const std::string& langsPath,
     report.ok = report.errors.empty() && report.languageCount > 0 && report.styleCount > 0;
 
     if (report.ok) {
-        std::cout << "[Notepad++ Linux] 配置载入成功: "
+        std::cout << "[Noda] 配置载入成功: "
                   << report.languageCount << " 种语言规则, "
                   << report.styleCount << " 套高亮主题样式。" << std::endl;
     } else {
-        std::cerr << "[Notepad++ Linux] 配置载入失败：" << report.errors.size()
+        std::cerr << "[Noda] 配置载入失败：" << report.errors.size()
                   << " 项错误（详见启动提示）。" << std::endl;
     }
     _lastReport = report;
@@ -282,7 +282,7 @@ std::vector<ThemeInfo> StyleManager::locateThemes(const std::string& appDir) {
 
     const std::vector<std::string> dirs = {
         appDir + "/themes",
-        appDir + "/../share/notepad-plus-plus-linux/themes",
+        appDir + "/../share/noda/themes",
         // 构建目录在 npp-linux/build，源码树主题在 npp-linux/themes。
         appDir + "/../themes",
         appDir + "/../../npp-linux/themes",

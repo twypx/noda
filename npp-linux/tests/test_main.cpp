@@ -33,8 +33,8 @@ int main(int argc, char* argv[]) {
     qputenv("QT_QPA_PLATFORM", "offscreen");
 
     QApplication app(argc, argv);
-    QCoreApplication::setApplicationName("Notepad++");
-    QCoreApplication::setOrganizationName("Notepad++");
+    QCoreApplication::setApplicationName(QStringLiteral("Noda"));
+    QCoreApplication::setOrganizationName(QStringLiteral("Noda"));
 
     int failures = 0;
     TestEncoding testEncoding;

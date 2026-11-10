@@ -4,11 +4,11 @@
 #include <QVector>
 #include <string_view>
 
-// Notepad++ 的“会话快照”由两部分组成，缺一不可：
+// 上游 的“会话快照”由两部分组成，缺一不可：
 //   session.xml  —— 记录打开过哪些文件、每个标签的光标/滚动位置、语言、编码；
 //   backup/ 目录 —— 把未保存的修改按 <文件名>@<创建时间> 落盘。
 // 两者配合才能做到“连没保存的内容也能在下次启动时原样恢复”，
-// 这也是 Notepad++ 在快照模式下退出时**不弹**“是否保存”的原因。
+// 这也是 上游 在快照模式下退出时**不弹**“是否保存”的原因。
 // 设计依据见上游 ScintillaComponent/Buffer.cpp 里 backupCurrentBuffer() 上方那段
 // “Specs and Algorithm of session snapshot & periodic backup system”。
 struct SessionFile {
@@ -28,7 +28,7 @@ struct SessionFile {
 
 class SessionManager {
 public:
-    // 配置目录：~/.config/Notepad++（与 QSettings 的落点一致）
+    // 配置目录：~/.config/Noda（与 QSettings 的落点一致）
     static QString configDir();
     static QString sessionPath();
     static QString backupDir();

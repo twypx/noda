@@ -57,7 +57,7 @@ struct ConfigLoadReport {
     std::size_t styleCount{0};
 };
 
-// Notepad++ 官方主题文件（PowerEditor/installer/themes/*.xml）的描述。
+// 上游 官方主题文件（PowerEditor/installer/themes/*.xml）的描述。
 struct ThemeInfo {
     std::string name;   // 不含 .xml 的显示名
     std::string path;   // 完整路径
@@ -102,7 +102,7 @@ public:
     // 已加载的全部语言名（供样式配置器列表使用）。
     std::vector<std::string> languageNames() const;
 
-    // 扫描 <appDir>/themes、<prefix>/share/notepad-plus-plus-linux/themes 等位置，
+    // 扫描 <appDir>/themes、<prefix>/share/noda/themes 等位置，
     // 返回按名称排序的官方主题列表；"Default"（内置 stylers）不在其中。
     static std::vector<ThemeInfo> locateThemes(const std::string& appDir);
     // 主题文件是安装期静态资源；仅在安装/卸载主题或测试时清空内存缓存。

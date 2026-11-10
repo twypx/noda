@@ -341,7 +341,7 @@ private:
     QToolBar* _toolBar{nullptr};
     QVector<QPair<QAction*, QString>> _toolActions;
 
-    // 列编辑器的上次参数：重开对话框时保留输入（同 Notepad++）。
+    // 列编辑器的上次参数：重开对话框时保留输入（同 上游）。
     ColumnEditorParams _colEditParams;
 
     // 代码格式化（AStyle）：耗时的格式化放工作线程，同一时刻只跑一个任务。

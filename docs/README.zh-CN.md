@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="../npp-linux/resources/icons/app_256.png" width="112" alt="Notepad++ for Linux LOGO">
+  <img src="../npp-linux/resources/icons/app_256.png" width="112" alt="Noda LOGO">
 </p>
 
-<h1 align="center">Notepad++ for Linux</h1>
+<h1 align="center">Noda</h1>
 
 <p align="center"><b>Linux 上最快的原生文本编辑器。</b><br>
 C++20 + Qt6 Widgets · Scintilla/Lexilla 内核 · 不用 Wine、不用 Electron、不用 WebView。</p>
@@ -13,18 +13,21 @@ C++20 + Qt6 Widgets · Scintilla/Lexilla 内核 · 不用 Wine、不用 Electron
 
 ---
 
-这是一个面向 Ubuntu / Linux 的原生 Notepad++ 移植：复用原版的资产与逻辑
-（`langs.model.xml`、`stylers.model.xml`、uchardet、Scintilla、Lexilla），但用纯
+Noda 是一款面向 Ubuntu / Linux 的原生文本编辑器，**基于 Notepad++ 源码修改**：复用其资产与
+逻辑（`langs.model.xml`、`stylers.model.xml`、uchardet、Scintilla、Lexilla），但用纯
 Qt6 Widgets 重写。它不是 Wine 包装，也不是 Electron 应用。
+
+> **归属说明**：本项目是对 Notepad++ 源码的独立修改，按 GPL-3.0 发布。
+> 与 Notepad++ 及其作者不存在隶属、背书或关联关系。
 
 更详细的技术文档见 **[../npp-linux/README.md](../npp-linux/README.md)**。
 
 ## 相比 Notepad++ 的增强
 
-部分能力与上游重叠；这里强调的是它们在本移植里**开箱即用、零第三方依赖、并为 Linux 调优**，
+部分能力与上游重叠；这里强调的是它们在Noda里**开箱即用、零第三方依赖、并为 Linux 调优**，
 而不是靠插件或兼容层拼出来。
 
-| 能力 | Notepad++（Windows） | 本移植 |
+| 能力 | Notepad++（Windows） | Noda |
 |---|---|---|
 | 平台 | 仅 Windows | **Linux 原生**（X11 + Wayland），提供 `.deb`、`.desktop`、hicolor 图标 |
 | 运行时 | Win32 / GDI | **C++20 + Qt6 Widgets**，冷启动约 80–120ms，内存约 35–45MB |
@@ -96,7 +99,7 @@ sudo apt install ./build-deb/notepad-plus-plus-linux_*_amd64.deb
 
 | 路径 | 来源 | 说明 |
 |---|---|---|
-| `npp-linux/` | 本移植项目 | 移植本体：主窗口、编辑器封装、各对话框、主题与图标工具链 |
+| `npp-linux/` | Noda | 应用本体：主窗口、编辑器封装、各对话框、主题与图标工具链 |
 | `scintilla/` | 上游 vendored | 编辑引擎（文本缓冲、选区、撤销、渲染） |
 | `lexilla/` | 上游 vendored | 词法高亮引擎与各语言 lexer |
 | `PowerEditor/src/uchardet/` | 上游 vendored | 字符编码自动识别 |
@@ -111,9 +114,10 @@ sudo apt install ./build-deb/notepad-plus-plus-linux_*_amd64.deb
 
 ## 许可
 
-- `npp-linux/` 沿用 Notepad++ 上游的 **GPL-3.0**（见根目录 [`LICENSE`](../LICENSE)）。
+- Noda 按 **GNU General Public License v3.0（GPL-3.0）** 发布（见根目录 [`LICENSE`](../LICENSE)）；
+  原始 Notepad++ 代码版权归 Copyright (C) 2021 Don HO 所有。
 - `scintilla/` 与 `lexilla/` 为 Neil Hodgson 的宽松许可（见各自的 `License.txt`）。
 - `PowerEditor/src/uchardet/` 为 **MPL 1.1 / GPL 2.0 / LGPL 2.1** 三重许可。
 - `PowerEditor/src/pugixml/` 为 **MIT**。
 
-本移植项目与 Notepad++ 官方项目相互独立，不是官方发布物。
+Noda 是独立项目，与 Notepad++ 及其作者不存在隶属、背书或关联关系，也不是 Notepad++ 官方发布物。

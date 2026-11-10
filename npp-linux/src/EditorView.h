@@ -21,7 +21,7 @@ struct DocSummary {
     int selLines{0};
 };
 
-// 列编辑器里数字的“开头补齐”方式，与 Notepad++ 的 None / Zeros / Spaces 一一对应。
+// 列编辑器里数字的“开头补齐”方式，与 上游 的 None / Zeros / Spaces 一一对应。
 enum class ColumnPad { none, zeros, spaces };
 
 class EditorView : public ScintillaEditBase {
@@ -112,14 +112,14 @@ public:
     void insertEmptyLine(bool above);
     void goToLine(int line);
 
-    // 列选模式（矩形选区）。三种入口与 Notepad++ 一致：
+    // 列选模式（矩形选区）。三种入口与 上游 一致：
     //   1. 按住 Alt 拖动鼠标；2. Alt+Shift + 方向键；3. 下面的 beginOrEndSelect 用键盘两点定块。
     // 前两种 Scintilla 原生就支持（rectangularSelectionModifier 默认就是 Alt），无需额外代码；
     // 这里只提供第三种，以及列编辑器需要的逐行改写能力。
     void beginOrEndSelect(bool columnMode);
 
     // 列编辑器（Alt+C）：往列选区的每一行写入同样的文本 / 递增数字序列。
-    // 没有列选区时退化为“从光标行一直写到文档结尾的光标所在列”，同 Notepad++。
+    // 没有列选区时退化为“从光标行一直写到文档结尾的光标所在列”，同 上游。
     bool hasColumnSelection() const { return send(SCI_SELECTIONISRECTANGLE) != 0 || send(SCI_GETSELECTIONS) > 1; }
     void columnInsertText(const QString& text);
     void columnInsertNumber(qint64 initial, qint64 increment, int repeatTimes, int base,
@@ -160,7 +160,7 @@ public:
     void markSelectedText(int styleIndex); // 1~5
     void clearMarks();
 
-    // URL 可点击链接（移植自 Notepad++ 的 Clickable Link）：
+    // URL 可点击链接（移植自 上游 的 Clickable Link）：
     // 自动识别可见文本里的 URL 并加下划线，按住 Ctrl 点击即在其默认程序（浏览器/邮件客户端）打开。
     void setUrlClickable(bool enabled);
     void refreshUrlHighlighting();   // 立即重算（首选项变更 / 测试用）
@@ -269,7 +269,7 @@ private:
     std::string _currentLang{"normal"};
     QString _fontName{"Monospace"};
     int _fontSize{10};
-    // “开始/结束 选取”的第一次调用只记下位置，第二次才真正拉出选区（同 Notepad++）。
+    // “开始/结束 选取”的第一次调用只记下位置，第二次才真正拉出选区（同 上游）。
     sptr_t _beginSelectPos{-1};
 
     // 高亮匹配首选项与防抖定时器：拖动选择时不能每移动一像素就全文档搜索一次。

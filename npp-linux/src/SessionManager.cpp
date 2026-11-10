@@ -27,7 +27,7 @@ bool parseSessionFile(const QString& source, QVector<SessionFile>& files, int& a
     // 不能在 while (!atEnd()) 里反复调 readNextStartElement()：读到 EndDocument 之后再调
     // 一次，Qt 会立即置 hasError("Premature end of document")，把解析成功的内容判成损坏，
     // 于是 read() 永远回退到备份分支，会话永远恢复不出来。
-    if (r.readNextStartElement() && r.name() == QLatin1String("NotepadPlus")) {
+    if (r.readNextStartElement() && r.name() == QLatin1String("Noda")) {
         while (r.readNextStartElement()) {
             if (r.name() != QLatin1String("Session")) {
                 r.skipCurrentElement();
@@ -84,8 +84,8 @@ bool parseSessionFile(const QString& source, QVector<SessionFile>& files, int& a
 
 QString SessionManager::configDir() {
     // 直接取 QSettings 的落点，而不是 QStandardPaths::AppConfigLocation：
-    // 本程序的组织名与应用名都是 "Notepad++"，后者会推导出
-    // ~/.config/Notepad++/Notepad++ 这种多一层的路径，与 Notepad++.conf 分家。
+    // 本程序的组织名与应用名都是 "Noda"，后者会推导出
+    // ~/.config/Noda/Noda 这种多一层的路径，与 Noda.conf 分家。
     QSettings s;
     return QFileInfo(s.fileName()).absolutePath();
 }
@@ -145,7 +145,7 @@ bool SessionManager::write(const QVector<SessionFile>& files, int activeIndex) {
     QXmlStreamWriter w(&out);
     w.setAutoFormatting(true);
     w.writeStartDocument(QStringLiteral("1.0"));
-    w.writeStartElement(QStringLiteral("NotepadPlus"));
+    w.writeStartElement(QStringLiteral("Noda"));
     w.writeStartElement(QStringLiteral("Session"));
     w.writeAttribute(QStringLiteral("activeView"), QStringLiteral("0"));
     // 本移植只有单视图，subView 仍写出来，保持与上游 session.xml 结构一致。
@@ -173,7 +173,7 @@ bool SessionManager::write(const QVector<SessionFile>& files, int activeIndex) {
     w.writeAttribute(QStringLiteral("activeIndex"), QStringLiteral("0"));
     w.writeEndElement(); // subView
     w.writeEndElement(); // Session
-    w.writeEndElement(); // NotepadPlus
+    w.writeEndElement(); // Noda
     w.writeEndDocument();
 
     return out.commit();

@@ -14,7 +14,7 @@ SingleInstance::~SingleInstance() {
 }
 
 QString SingleInstance::defaultServerName() {
-    return QStringLiteral("notepad-plus-plus-linux-%1").arg(::getuid());
+    return QStringLiteral("noda-%1").arg(::getuid());
 }
 
 bool SingleInstance::trySendFilesToRunningInstance(const QStringList& filePaths,

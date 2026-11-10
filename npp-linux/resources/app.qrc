@@ -1,8 +1,10 @@
 <!DOCTYPE RCC><RCC version="1.0">
 <qresource prefix="/app">
     <file alias="icons/app_16.png">icons/app_16.png</file>
+    <file alias="icons/app_20.png">icons/app_20.png</file>
     <file alias="icons/app_24.png">icons/app_24.png</file>
     <file alias="icons/app_32.png">icons/app_32.png</file>
+    <file alias="icons/app_40.png">icons/app_40.png</file>
     <file alias="icons/app_48.png">icons/app_48.png</file>
     <file alias="icons/app_64.png">icons/app_64.png</file>
     <file alias="icons/app_128.png">icons/app_128.png</file>

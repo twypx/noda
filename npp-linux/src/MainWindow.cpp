@@ -137,7 +137,7 @@ MainWindow::MainWindow(QWidget* parent)
     // 编辑区由 ScintillaEditBase 自己接收拖放；主窗口覆盖标题栏/标签栏/工具栏/状态栏等其余区域。
     setAcceptDrops(true);
     setCentralWidget(_tabManager);
-    setWindowTitle("Notepad++ (Linux)");
+    setWindowTitle(QStringLiteral("Noda"));
     resize(1080, 780);
 
     // 记住系统默认字体：首选项选“系统默认”时要能恢复，而不是把当前字体当成默认。
@@ -179,7 +179,7 @@ MainWindow::MainWindow(QWidget* parent)
     });
     // 标签被销毁时删掉它的备份，不然 backup/ 下会留一堆没人引用的孤儿文件。
     connect(_tabManager, &TabManager::editorClosing, this, &MainWindow::dropBackup);
-    // 双击标签栏空白处新建文档（上游 Notepad++ 的同一手势）。走 onNewFile 而不是直接
+    // 双击标签栏空白处新建文档（上游 的同一手势）。走 onNewFile 而不是直接
     // createNewTab()，新建的文档才会带上首选项里的默认 EOL / 编码。
     connect(_tabManager, &TabManager::blankAreaActivated, this, &MainWindow::onNewFile);
     // 标签右键：TabManager 已经选中被点的标签，这里只负责弹出对应菜单。
@@ -310,7 +310,7 @@ void MainWindow::setupEditMenu() {
     menu->addAction("全选(&A)", QKeySequence::SelectAll, this, &MainWindow::onSelectAll);
 
     // “两点定块”：先把光标放在起点执行一次，再移到终点执行一次，中间用普通移动光标即可。
-    // 两条命令只差选取模式，菜单里成对出现（同 Notepad++）。
+    // 两条命令只差选取模式，菜单里成对出现（同 上游）。
     menu->addAction("开始/结束 选取(&S)", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_B), this,
                     [this]() { onBeginEndSelect(false); });
     menu->addAction("开始/结束 按列选取", QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_B), this,
@@ -630,7 +630,7 @@ void MainWindow::setupSettingsMenu() {
 void MainWindow::setupHelpMenu() {
     auto* menu = menuBar()->addMenu("帮助(&H)");
     _actAbout = menu->addAction(toolBarIcon(QStringLiteral("info"), _prefs.darkMode),
-                                "关于 Notepad++(&A)...", this, &MainWindow::onAbout);
+                                "关于 Noda(&A)...", this, &MainWindow::onAbout);
     _actAbout->setShortcut(QKeySequence(Qt::Key_F1));
 }
 
@@ -1470,7 +1470,7 @@ void MainWindow::onBeginEndSelect(bool columnMode) {
 }
 
 void MainWindow::onColumnModeTip() {
-    // 内容对齐 Notepad++ 的“列选模式提示”，只把第三种方法的菜单名换成本端口的叫法。
+    // 内容对齐 上游 的“列选模式提示”，只把第三种方法的菜单名换成本端口的叫法。
     QMessageBox::information(this, QStringLiteral("列选模式提示"),
         QStringLiteral(
             "有 3 种方法可以切换到列选模式：\n\n"
@@ -1636,7 +1636,7 @@ void MainWindow::onToggleShowEOL(bool show) {
 }
 
 void MainWindow::onToggleShowAllChars(bool show) {
-    // “显示所有字符”是前两个开关的合体（与 Notepad++ 一致）。
+    // “显示所有字符”是前两个开关的合体（与 上游 一致）。
     // 注意 setChecked() 只发射 toggled、不发射 triggered，而渲染逻辑是挂在 triggered 上的，
     // 所以不能指望两个分量开关替我们把命令发出去，必须在这里自己应用一遍。
     if (_actShowWs) _actShowWs->setChecked(show);
@@ -2373,8 +2373,8 @@ void MainWindow::syncWindowTitle() {
     const int idx = _tabManager->currentIndex();
     QString name = idx >= 0 ? _tabManager->tabText(idx) : QString();
     if (name.endsWith('*')) name.chop(1); // 去掉 TabManager 追加的修改标记 '*'
-    setWindowTitle(name.isEmpty() ? QStringLiteral("Notepad++ (Linux)")
-                                  : name + " - Notepad++ (Linux)");
+    setWindowTitle(name.isEmpty() ? QStringLiteral("Noda")
+                                  : name + QStringLiteral(" - Noda"));
 }
 
 void MainWindow::onCursorChanged(int line, int col) {

@@ -129,7 +129,7 @@ void StartupNotify::notifyComplete() {
     }
 
     // 载荷：“remove: ID=\"<id>\"” 再加一个 NUL。引号不能省 —— 启动 id 中间那段是
-    // .desktop 的 Name（我们的是 “Notepad++ (Linux)”，带空格），不带引号的写法会被解析器
+    // .desktop 的 Name（我们的是 “Noda”），不带引号的写法会被解析器
     // 在空格处截断：Qt 自己发的那条就是不带引号的，实测启动器完全不认，序列还是挂到超时。
     // 带引号这一形状是用 gedit（207ms 就结束转圈）在线上抓到的。
     QByteArray payload = "remove: ID=\"";

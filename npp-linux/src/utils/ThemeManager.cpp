@@ -239,7 +239,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 margin: 4px 4px;
             }
 
-            /* 标签页组件 (对齐 Notepad++，标签与内容区域零缝隙贴合) */
+            /* 标签页组件 (对齐 上游，标签与内容区域零缝隙贴合) */
             QTabWidget::pane {
                 border: 1px solid #383838;
                 border-top: 1px solid #333333;
@@ -572,7 +572,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 margin: 4px 4px;
             }
 
-            /* 标签页组件 (对齐 Notepad++，标签与内容区域零缝隙贴合) */
+            /* 标签页组件 (对齐 上游，标签与内容区域零缝隙贴合) */
             QTabWidget::pane {
                 border: 1px solid #d4d4d4;
                 border-top: 1px solid #e4e4e4;

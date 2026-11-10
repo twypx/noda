@@ -11,7 +11,7 @@ class QEvent;
 class QTreeWidgetItem;
 class QWidget;
 
-// 界面语言切换：直接复用 Notepad++ 的 nativeLang/english.xml 与 chineseSimplified.xml。
+// 界面语言切换：直接复用 上游 的 nativeLang/english.xml 与 chineseSimplified.xml。
 //
 // 本移植历史上把中文文案直接写在代码里，没有 Qt 的 tr() / .qm 体系。为了不重写上百处
 // setText()，这里以「中文原文」为源串：遍历已创建的 QObject，按属性 (text/title/

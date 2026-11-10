@@ -4,12 +4,12 @@
 #
 # 用法：
 #   ./install_desktop.sh [可执行文件绝对路径]
-# 不传参数时，默认使用 /usr/local/bin/notepad-plus-plus-linux，
-# 若该路径不存在则回退到本仓库的 build/notepad-plus-plus-linux。
+# 不传参数时，默认使用 /usr/local/bin/noda，
+# 若该路径不存在则回退到本仓库的 build/noda。
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-icon_name="notepad-plus-plus-linux"
+icon_name="noda"
 exe="${1:-}"
 
 if [[ -z "$exe" ]]; then

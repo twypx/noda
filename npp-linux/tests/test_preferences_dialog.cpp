@@ -246,7 +246,7 @@ void TestPreferencesDialog::officialThemesApplyAndReset() {
 
     const auto themes = StyleManager::locateThemes(
         QCoreApplication::applicationDirPath().toStdString());
-    QVERIFY2(themes.size() >= 20, "必须找到 Notepad++ 官方主题文件");
+    QVERIFY2(themes.size() >= 20, "必须找到上游官方主题文件");
 
     std::string monokaiPath;
     for (const ThemeInfo& theme : themes) {

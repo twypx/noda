@@ -34,7 +34,7 @@ void paintTextLines(QPainter& p, const QStringList& lines, int tabWidth, int fro
         QString line = lines[i];
         if (line.endsWith(QLatin1Char('\r'))) line.chop(1); // CRLF 文档按 LF 切分后残留的 CR
 
-        // 制表符展开到列边界；超出页宽的列直接截断（与 Notepad++ 默认“打印不折行”一致）。
+        // 制表符展开到列边界；超出页宽的列直接截断（与 上游 默认“打印不折行”一致）。
         QString out;
         int col = 0;
         for (const QChar ch : line) {

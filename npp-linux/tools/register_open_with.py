@@ -23,7 +23,7 @@ import shutil
 import sys
 import time
 
-DESKTOP_ID = "notepad-plus-plus-linux.desktop"
+DESKTOP_ID = "noda.desktop"
 SECTION = "[Added Associations]"
 
 

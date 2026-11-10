@@ -184,7 +184,7 @@ void ColumnEditorDialog::updateEnabledState() {
     _textEdit->setEnabled(textMode);
     _numberArea->setEnabled(!textMode);
     _hexCaseCombo->setEnabled(!textMode && _baseGroup->checkedId() == 16);
-    // 同 Notepad++：文本模式下内容为空时确定键无效；数字模式始终可点，靠校验给反馈。
+    // 同 上游：文本模式下内容为空时确定键无效；数字模式始终可点，靠校验给反馈。
     _okBtn->setEnabled(!textMode || !_textEdit->text().isEmpty());
 }
 

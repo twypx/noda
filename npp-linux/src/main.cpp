@@ -40,24 +40,26 @@ int main(int argc, char* argv[]) {
 
     // 启用高清屏幕支持（针对 4K/2K HiDPI）
     QApplication app(argc, argv);
-    app.setApplicationName("Notepad++");
-    app.setOrganizationName("Notepad++");
+    app.setApplicationName(QStringLiteral("Noda"));
+    app.setOrganizationName(QStringLiteral("Noda"));
 
     // 上游 nativeLang（中文/英文）资源 + 全局控件翻译过滤器。
     LocalizationManager::instance().initialize(&app);
 
-    // 应用图标：由 notepad++_cutout.png 经 tools/gen_icons.py 生成透明背景多尺寸 PNG
+    // 应用图标：由 tools/gen_icons.py 从设计稿生成透明背景多尺寸 PNG
     // 并内嵌到可执行文件（qrc），
     // 因此不依赖系统 QtSvg 开发包，也不会因为换机器运行而丢图标。
     QIcon appIcon;
-    for (int size : {16, 24, 32, 48, 64, 128, 256})
+    // 20/40 是为标题栏 1x / 2x 专门提供的原生尺寸：请求 20 或 40 时精确命中，
+    // 不再由 24/48 缩放而来，避免左上角图标发糊。
+    for (int size : {16, 20, 24, 32, 40, 48, 64, 128, 256})
         appIcon.addFile(QStringLiteral(":/app/icons/app_%1.png").arg(size), QSize(size, size));
     if (!appIcon.availableSizes().isEmpty()) {
         app.setWindowIcon(appIcon);       // 对所有顶层窗口（含对话框）生效
     }
-    // Wayland/X11 任务栏靠 .desktop 文件识别应用；名字必须与安装的 notepad-plus-plus-linux.desktop 一致，
+    // Wayland/X11 任务栏靠 .desktop 文件识别应用；名字必须与安装的 noda.desktop 一致，
     // 否则 GNOME 会把窗口归到“匿名应用”而显示通用图标。
-    app.setDesktopFileName(QStringLiteral("notepad-plus-plus-linux"));
+    app.setDesktopFileName(QStringLiteral("noda"));
 
     // 载入语法与高亮样式配置。路径探测统一交给 StyleManager，结果带完整诊断信息。
     // 缺文件 / 解析失败必须显式告知：旧实现跳过 loadConfigs 后静默启动，
@@ -75,7 +77,7 @@ int main(int argc, char* argv[]) {
     if (!report.ok) {
         const QString detail = QString::fromStdString(
             StyleManager::buildDiagnostic(configPaths, report));
-        std::cerr << "[Notepad++ Linux] " << detail.toStdString() << std::endl;
+        std::cerr << "[Noda] " << detail.toStdString() << std::endl;
         QMessageBox::critical(nullptr, QStringLiteral("语法配置载入失败"), detail);
     }
 

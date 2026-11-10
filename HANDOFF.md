@@ -1,4 +1,4 @@
-# HANDOFF — Notepad++ Linux 移植开发交接
+# HANDOFF — Noda 开发交接
 
 > 原交接基于 `481409a`；当前基线为远程 `origin/master` = `dec7c62`（v1.0.8）。
 > 本轮「半成品与静默失败治理」的改动**尚未提交**；若 HEAD 已变动，请以代码与 `npp-linux/README.md` 为准。
@@ -14,7 +14,7 @@
 
 ## 1. 项目是什么
 
-Notepad++ 的 Ubuntu / Linux 原生移植：纯 **C++20 + Qt6 Widgets**，编辑核心直接用 Scintilla 的 Qt 接口（`ScintillaEditBase` + Lexilla）。不是 QML、不是 Webview、不是 Wine。
+Noda 是面向 Ubuntu / Linux 的原生文本编辑器，基于 Notepad++ 源码独立修改（GPL-3.0）：纯 **C++20 + Qt6 Widgets**，编辑核心直接用 Scintilla 的 Qt 接口（`ScintillaEditBase` + Lexilla）。不是 QML、不是 Webview、不是 Wine。与 Notepad++ 及其作者无隶属、背书或关联关系。
 
 上游 `AGENTS.md` 写着「仅支持 Windows，不要添加其他平台支持」——那条与本项目冲突，本仓库**刻意不含**该文件。
 

@@ -10,7 +10,7 @@
 #include <QVBoxLayout>
 
 AboutDlg::AboutDlg(QWidget* parent) : QDialog(parent) {
-    setWindowTitle(QStringLiteral("关于 Notepad++"));
+    setWindowTitle(QStringLiteral("关于 Noda"));
     setWindowIcon(QIcon(QStringLiteral(":/app/icons/app_64.png")));
     setModal(true);
 
@@ -48,14 +48,14 @@ void AboutDlg::setupUi() {
     auto* titleLayout = new QVBoxLayout();
     titleLayout->setSpacing(4);
 
-    auto* titleLabel = new QLabel(QStringLiteral("Notepad++"), this);
+    auto* titleLabel = new QLabel(QStringLiteral("Noda"), this);
     QFont titleFont = titleLabel->font();
     titleFont.setPointSize(titleFont.pointSize() + 8);
     titleFont.setBold(true);
     titleLabel->setFont(titleFont);
     titleLayout->addWidget(titleLabel);
 
-    auto* subtitleLabel = new QLabel(QStringLiteral("Linux Native Port (Qt6 & Scintilla)"), this);
+    auto* subtitleLabel = new QLabel(QStringLiteral("Native Linux Text Editor (Qt6 & Scintilla)"), this);
     QFont subFont = subtitleLabel->font();
     subFont.setPointSize(subFont.pointSize() - 1);
     subtitleLabel->setFont(subFont);
@@ -91,22 +91,33 @@ void AboutDlg::setupUi() {
     auto* envLabel = new QLabel(envInfo, this);
     detailsLayout->addWidget(envLabel);
 
-    auto* homeLabel = new QLabel(
-        QStringLiteral("官方网站: <a href=\"https://notepad-plus-plus.org\">https://notepad-plus-plus.org</a>"),
-        this);
-    homeLabel->setOpenExternalLinks(true);
-    detailsLayout->addWidget(homeLabel);
-
     auto* repoLabel = new QLabel(
-        QStringLiteral("移植仓库: <a href=\"https://gitee.com/twypx/notepad-plus-plus-linux\">Gitee: twypx/notepad-plus-plus-linux</a>"),
+        QStringLiteral("Repository: <a href=\"https://gitee.com/twypx/notepad-plus-plus-linux\">Gitee: twypx/notepad-plus-plus-linux</a>"),
         this);
     repoLabel->setOpenExternalLinks(true);
     detailsLayout->addWidget(repoLabel);
 
     auto* licenseLabel = new QLabel(
-        QStringLiteral("开源协议: GNU General Public License version 3 (GPL-3.0)"),
+        QStringLiteral("License: GNU General Public License version 3 (GPL-3.0)"),
         this);
     detailsLayout->addWidget(licenseLabel);
+
+    // 归属说明：只说明“基于 Notepad++ 源码修改”，不暗示与上游存在隶属或背书关系。
+    auto* attributionLabel = new QLabel(
+        QStringLiteral("Based on Notepad++ (GPL-3.0): "
+                       "<a href=\"https://notepad-plus-plus.org\">https://notepad-plus-plus.org</a>"),
+        this);
+    attributionLabel->setOpenExternalLinks(true);
+    attributionLabel->setWordWrap(true);
+    detailsLayout->addWidget(attributionLabel);
+
+    auto* disclaimerLabel = new QLabel(
+        QStringLiteral("This project is an independent modification of Notepad++ source code, "
+                       "released under GPL-3.0. It is not affiliated with, endorsed by, or "
+                       "connected to Notepad++ or its author."),
+        this);
+    disclaimerLabel->setWordWrap(true);
+    detailsLayout->addWidget(disclaimerLabel);
 
     mainLayout->addLayout(detailsLayout);
 

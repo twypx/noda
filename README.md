@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="npp-linux/resources/icons/app_256.png" width="112" alt="Notepad++ for Linux logo">
+  <img src="npp-linux/resources/icons/app_256.png" width="112" alt="Noda logo">
 </p>
 
-<h1 align="center">Notepad++ for Linux</h1>
+<h1 align="center">Noda</h1>
 
 <p align="center"><b>The fastest native text editor for Linux.</b><br>
 C++20 + Qt6 Widgets · Scintilla/Lexilla core · no Wine, no Electron, no WebView.</p>
@@ -13,19 +13,22 @@ C++20 + Qt6 Widgets · Scintilla/Lexilla core · no Wine, no Electron, no WebVie
 
 ---
 
-A native Ubuntu/Linux port of Notepad++, built on the original assets and logic
-(`langs.model.xml`, `stylers.model.xml`, uchardet, Scintilla, Lexilla) but rewritten as a
-pure Qt6 Widgets application. It is **not** a Wine wrapper and **not** an Electron app.
+Noda is a native Linux text editor **derived from Notepad++ source code**. It keeps the upstream
+assets and logic (`langs.model.xml`, `stylers.model.xml`, uchardet, Scintilla, Lexilla) but is
+rewritten as a pure Qt6 Widgets application. It is **not** a Wine wrapper and **not** an Electron app.
+
+> **Attribution.** Noda is an independent modification of Notepad++ source code, released under
+> GPL-3.0. It is not affiliated with, endorsed by, or connected to Notepad++ or its author.
 
 The detailed, deep-dive technical documentation lives in
 **[npp-linux/README.md](npp-linux/README.md)**.
 
-## What this port adds over Notepad++
+## What Noda adds over Notepad++
 
 Some features overlap with upstream; the point is that they are **built in, dependency-free,
 and tuned for Linux** — not bolted on through plugins or a compatibility layer.
 
-| Capability | Notepad++ (Windows) | This port |
+| Capability | Notepad++ (Windows) | Noda |
 |---|---|---|
 | Platform | Windows only | **Native Linux** (X11 + Wayland), `.deb`, `.desktop`, hicolor icons |
 | Runtime | Win32 / GDI | **C++20 + Qt6 Widgets**, ~80–120 ms cold start, ~35–45 MB RSS |
@@ -103,7 +106,7 @@ This repository vendors every third-party source needed to build, so the directo
 
 | Path | Origin | Purpose |
 |---|---|---|
-| `npp-linux/` | This port | Application: windows, editor wrapper, dialogs, theme and icon tooling |
+| `npp-linux/` | Noda | Application: windows, editor wrapper, dialogs, theme and icon tooling |
 | `scintilla/` | Upstream (vendored) | Editing engine (buffer, selection, undo, rendering) |
 | `lexilla/` | Upstream (vendored) | Lexer engine and per-language lexers |
 | `PowerEditor/src/uchardet/` | Upstream (vendored) | Charset auto-detection |
@@ -118,9 +121,11 @@ This repository vendors every third-party source needed to build, so the directo
 
 ## License
 
-- `npp-linux/` keeps Notepad++'s upstream **GPL-3.0** (see [`LICENSE`](LICENSE)).
+- Noda is released under the **GNU General Public License v3.0 (GPL-3.0)** — see [`LICENSE`](LICENSE).
+  Original Notepad++ code is Copyright (C) 2021 Don HO <don.h@free.fr>.
 - `scintilla/` and `lexilla/` are under Neil Hodgson's permissive licenses (see each `License.txt`).
 - `PowerEditor/src/uchardet/` is triple-licensed **MPL 1.1 / GPL 2.0 / LGPL 2.1**.
 - `PowerEditor/src/pugixml/` is **MIT**.
 
-This port is independent of the official Notepad++ project and is not an official release.
+Noda is an independent project. It is not affiliated with, endorsed by, or connected to Notepad++
+or its author, and it is not an official release of the Notepad++ project.

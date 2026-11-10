@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "${SCRIPT_DIR}")"
 BUILD_DIR="${ROOT_DIR}/build"
 
-echo "=== Notepad++ Linux 回归测试 ==="
+echo "=== Noda 回归测试 ==="
 cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" \
     -DCMAKE_BUILD_TYPE=Release -DNPP_BUILD_TESTS=ON
 

@@ -89,7 +89,7 @@ static constexpr sptr_t kHighlightContextLines = 200;
 // 单次重算的时间预算，超时立即熔断，绝不让选词拖住 UI 线程。
 static constexpr qint64 kHighlightBudgetMs = 5;
 
-// ---------------- URL 识别（移植自 Notepad++ 的 isUrl 系列，去掉 Win32 InternetCrackUrl） ----------------
+// ---------------- URL 识别（移植自 上游 的 isUrl 系列，去掉 Win32 InternetCrackUrl） ----------------
 // 全部基于 QString/QChar 操作，scheme 一旦确认即视为有效链接，边界处理与原版保持一致。
 namespace {
 
@@ -441,12 +441,12 @@ void EditorView::initEditorDefaults() {
     send(SCI_SETMARGINMASKN, 1, (1 << MARK_BOOKMARK));
     send(SCI_SETMARGINSENSITIVEN, 1, 1);
 
-    // 定义书签外观 (Notepad++ 经典蓝色圆圈标记)
+    // 定义书签外观 (上游 经典蓝色圆圈标记)
     send(SCI_MARKERDEFINE, MARK_BOOKMARK, SC_MARK_CIRCLE);
     send(SCI_MARKERSETFORE, MARK_BOOKMARK, scRgb(0, 0, 180));
     send(SCI_MARKERSETBACK, MARK_BOOKMARK, scRgb(0, 165, 255));
 
-    // 3. 代码折叠列 (Margin 2: Notepad++ 经典方块树 Box Tree 风格)
+    // 3. 代码折叠列 (Margin 2: 上游 经典方块树 Box Tree 风格)
     send(SCI_SETMARGINTYPEN, 2, SC_MARGIN_SYMBOL);
     send(SCI_SETMARGINWIDTHN, 2, 14);
     send(SCI_SETMARGINMASKN, 2, SC_MASK_FOLDERS);
@@ -896,7 +896,7 @@ void EditorView::applyLanguage(const std::string& langName) {
     const auto* langDef = StyleManager::instance().getLanguage(langName);
     if (langDef) {
         if (lexerName == "cpp") {
-            // 对齐 Notepad++ Cpp/Java/JavaScript 词法器关键字规范
+            // 对齐 上游 Cpp/Java/JavaScript 词法器关键字规范
             // slot 0: instre1 (指令关键字: if, else, return, new, import, package...)
             if (langDef->rawKeywords.count("instre1")) {
                 sends(SCI_SETKEYWORDS, 0, langDef->rawKeywords.at("instre1").c_str());
@@ -1085,7 +1085,7 @@ void EditorView::goToLine(int line) {
 
 // ---------------------------------------------------------------------------
 // 列选模式（矩形选区）与列编辑器
-// 语义照搬 Notepad++：列选区在 Scintilla 内部是“每行一个 selection”，
+// 语义照搬 上游：列选区在 Scintilla 内部是“每行一个 selection”，
 // 列编辑器逐行把选区区间换成要写入的内容，写完再把选区拉回到新内容上，
 // 这样连续按几次 Alt+C 可以接着上次的列位置继续填。
 // ---------------------------------------------------------------------------
@@ -1296,7 +1296,7 @@ void EditorView::columnInsertText(const QString& text) {
 
 void EditorView::columnInsertNumber(qint64 initial, qint64 increment, int repeatTimes, int base,
                                    bool hexUpper, ColumnPad pad) {
-    // repeat 至少为 1，否则下面生成序列的循环永不调数（同 Notepad++ 的保护）。
+    // repeat 至少为 1，否则下面生成序列的循环永不调数（同 上游 的保护）。
     repeatTimes = qMax(1, repeatTimes);
 
     // 先取列选区：有列块时“一行一个选区”，没有时退化为“光标行到文档结尾”，
