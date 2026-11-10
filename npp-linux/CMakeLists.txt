@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(NotepadPlusPlus_Linux
-    VERSION 1.0.10
+    VERSION 1.0.11
     LANGUAGES CXX C)
 
 add_compile_definitions(NPP_VERSION_STRING="${PROJECT_VERSION}")
@@ -187,7 +187,7 @@ target_link_libraries(npp_core PUBLIC
     astyle
 )
 
-add_executable(notepad-plus-plus-linux
+add_executable(noda
     src/main.cpp
     resources/app.qrc
     resources/toolbar.qrc
@@ -195,7 +195,7 @@ add_executable(notepad-plus-plus-linux
 )
 
 # 自动将 langs.model.xml 和 stylers.model.xml 复制到构建输出目录，保证开箱即用
-add_custom_command(TARGET notepad-plus-plus-linux POST_BUILD
+add_custom_command(TARGET noda POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${POWEREDITOR_SRC}/langs.model.xml"
         "${CMAKE_CURRENT_BINARY_DIR}/langs.model.xml"
@@ -204,7 +204,7 @@ add_custom_command(TARGET notepad-plus-plus-linux POST_BUILD
         "${CMAKE_CURRENT_BINARY_DIR}/stylers.model.xml"
 )
 
-target_link_libraries(notepad-plus-plus-linux PRIVATE
+target_link_libraries(noda PRIVATE
     ${QT_TARGETS}
     scintilla_qt
     lexilla
@@ -225,31 +225,31 @@ if(XCB_FOUND)
     # 链接留给最终的可执行文件（OBJECT 库本身不产生链接步骤）。
     target_compile_definitions(npp_core PRIVATE NPP_HAVE_XCB=1)
     target_include_directories(npp_core PRIVATE ${XCB_INCLUDE_DIRS})
-    target_compile_definitions(notepad-plus-plus-linux PRIVATE NPP_HAVE_XCB=1)
-    target_link_libraries(notepad-plus-plus-linux PRIVATE ${XCB_LIBRARIES})
+    target_compile_definitions(noda PRIVATE NPP_HAVE_XCB=1)
+    target_link_libraries(noda PRIVATE ${XCB_LIBRARIES})
     message(STATUS "找到 libxcb（${XCB_VERSION}）：启用 X11 启动通知补漏")
 else()
     message(STATUS "未找到 libxcb（可装 libxcb1-dev）：跳过 X11 启动通知补漏")
 endif()
 
-message(STATUS "Notepad++ (Linux Port) CMake configuration ready.")
+message(STATUS "Noda CMake configuration ready.")
 
 # 包名/安装目录名。Debian 包名只允许小写字母、数字和连字符，这里同时用作
 # 图标名与 .desktop 文件名，三者必须一致 GNOME 才能把窗口关联到桌面入口。
-set(NPP_PKG_NAME "notepad-plus-plus-linux")
+set(NPP_PKG_NAME "noda")
 
 # 安装规则：XML 装进 share 而非 bin（bin 下只放可执行文件）。main.cpp 通过
-# applicationDirPath()/../share/notepad-plus-plus-linux 相对定位，因此无论前缀是
+# applicationDirPath()/../share/noda 相对定位，因此无论前缀是
 # /usr、/usr/local 还是解包到临时目录，都能命中，不依赖任何编译期绝对路径。
 include(GNUInstallDirs)
-install(TARGETS notepad-plus-plus-linux RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS noda RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES
     "${POWEREDITOR_SRC}/langs.model.xml"
     "${POWEREDITOR_SRC}/stylers.model.xml"
     DESTINATION ${CMAKE_INSTALL_DATADIR}/${NPP_PKG_NAME})
 
-# 官方主题包（直接取自 Notepad++ 源码 PowerEditor/installer/themes）：
-# 构建目录留一份供运行/测试直接命中，安装时进 share/notepad-plus-plus-linux/themes。
+# 官方主题包（直接取自上游源码 PowerEditor/installer/themes）：
+# 构建目录留一份供运行/测试直接命中，安装时进 share/noda/themes。
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/themes"
      DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/themes/"
@@ -262,7 +262,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/nativeLang/"
         DESTINATION ${CMAKE_INSTALL_DATADIR}/${NPP_PKG_NAME}/nativeLang)
 
 # 应用图标与桌面入口：图标名与 .desktop 文件名一致，GNOME 才能把任务栏悬停提示关联到本窗口
-set(NPP_ICON_NAME "notepad-plus-plus-linux")
+set(NPP_ICON_NAME "noda")
 install(DIRECTORY resources/icons/hicolor/ DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor
         FILES_MATCHING PATTERN "*.png")
 
@@ -295,7 +295,8 @@ set(CPACK_PACKAGE_VENDOR "twypx")
 set(CPACK_PACKAGE_CONTACT "twypx <twypx_1986@sina.com>")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "Notepad++ Linux port: native Qt6 Widgets editor with the Scintilla engine")
+    "Noda: native Qt6 Widgets text editor with the Scintilla engine")
+# 仓库地址保持真实位置，不随产品名改写，避免链接失效。
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://gitee.com/twypx/notepad-plus-plus-linux")
 
 # 按 Debian 政策装到 /usr，而不是 CMake 默认的 /usr/local
