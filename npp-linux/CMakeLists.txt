@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(Noda
-    VERSION 1.0.13
+    VERSION 1.0.14
     LANGUAGES CXX C)
 
 add_compile_definitions(NPP_VERSION_STRING="${PROJECT_VERSION}")
