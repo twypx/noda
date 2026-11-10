@@ -42,6 +42,7 @@
 #include "dialogs/StyleOverride.h"
 #include "dialogs/ShortcutManager.h"
 #include "dialogs/AboutDlg.h"
+#include "widgets/CompareWidget.h"
 #include "utils/SingleInstance.h"
 
 namespace {
@@ -532,6 +533,26 @@ void MainWindow::setupViewMenu() {
     _actViewHex->setCheckable(true);
     _actViewHex->setShortcut(QKeySequence(tr("Ctrl+Alt+H")));
 
+    menu->addSeparator();
+    _actCompare = menu->addAction(tr("文件对比(&C)"), this, &MainWindow::onCompareFiles);
+    _actCompare->setObjectName("actCompare");
+    _actCompare->setShortcut(QKeySequence(tr("Ctrl+Alt+C")));
+
+    _actClearCompare = menu->addAction(tr("关闭对比(&X)"), this, &MainWindow::onCloseCompare);
+    _actClearCompare->setObjectName("actClearCompare");
+    _actClearCompare->setShortcut(QKeySequence(tr("Ctrl+Alt+X")));
+    _actClearCompare->setEnabled(false);
+
+    _actNextDiff = menu->addAction(tr("下一个差异(&N)"), this, &MainWindow::onNextDiff);
+    _actNextDiff->setObjectName("actNextDiff");
+    _actNextDiff->setShortcut(QKeySequence(Qt::Key_F8));
+    _actNextDiff->setEnabled(false);
+
+    _actPrevDiff = menu->addAction(tr("上一个差异(&P)"), this, &MainWindow::onPrevDiff);
+    _actPrevDiff->setObjectName("actPrevDiff");
+    _actPrevDiff->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F8));
+    _actPrevDiff->setEnabled(false);
+
     _actDarkMode = menu->addAction("深色模式", this, &MainWindow::onToggleDarkMode);
     _actDarkMode->setCheckable(true);
 }
@@ -708,6 +729,11 @@ void MainWindow::setupToolBar() {
     addToggleTool("pilcrow", QStringLiteral("显示所有字符"), _actShowAll, &MainWindow::onToggleShowAllChars);
     addToggleTool("indent-guide", QStringLiteral("显示缩进参考线"), _actShowGuides, &MainWindow::onToggleShowIndentGuides);
     addToggleTool("binary", QStringLiteral("以十六进制查看"), _actViewHex, &MainWindow::onToggleHexView);
+
+    QAction* tbCompare = _toolBar->addAction(QStringLiteral("文件对比"));
+    connect(tbCompare, &QAction::triggered, this, &MainWindow::onCompareFiles);
+    tbCompare->setToolTip(QStringLiteral("文件对比 (Ctrl+Alt+C)"));
+    _toolActions.append(qMakePair(tbCompare, QStringLiteral("git-compare")));
 
     refreshToolBarIcons();
 }
@@ -1694,12 +1720,117 @@ void MainWindow::onToggleHexView(bool enabled) {
     _tabManager->toggleHexView(enabled);
 }
 
+MainWindow::~MainWindow() {
+    // 比对使用独立编辑器副本；CompareWidget 析构会把它们 detach，必须在这里回收。
+    delete _compareWidget;
+    _compareWidget = nullptr;
+    delete _compareEdA;
+    _compareEdA = nullptr;
+    delete _compareEdB;
+    _compareEdB = nullptr;
+}
+
+void MainWindow::onCompareFiles() {
+    if (_compareWidget) {
+        _compareWidget->refreshDiff();
+        return;
+    }
+
+    if (_tabManager->count() < 2) {
+        statusBar()->showMessage(tr("比对功能至少需要打开两个标签页"), 3000);
+        return;
+    }
+
+    const int curr = _tabManager->currentIndex();
+    const int other = (curr > 0) ? (curr - 1) : 1;
+    EditorView* edA = _tabManager->editorAt(std::min(curr, other));
+    EditorView* edB = _tabManager->editorAt(std::max(curr, other));
+    if (!edA || !edB) return;
+
+    // 大文件护栏：单侧 16MB 以上直接拒绝，避免同步比对卡死 UI 或耗尽内存。
+    constexpr sptr_t kMaxCompareBytes = 16 * 1024 * 1024;
+    if (edA->send(SCI_GETLENGTH) > kMaxCompareBytes || edB->send(SCI_GETLENGTH) > kMaxCompareBytes) {
+        statusBar()->showMessage(tr("文件过大，暂不支持比对（单侧上限 16MB）"), 5000);
+        return;
+    }
+
+    // 用独立副本比对，绝不 reparent TabManager 的页面：关闭对比后标签页仍然完好。
+    _compareEdA = new EditorView();
+    _compareEdB = new EditorView();
+    _compareEdA->setTextFromUtf8(edA->currentTextUtf8());
+    _compareEdB->setTextFromUtf8(edB->currentTextUtf8());
+    _compareEdA->send(SCI_SETREADONLY, 1);
+    _compareEdB->send(SCI_SETREADONLY, 1);
+    _compareEdA->setDarkMode(_prefs.darkMode);
+    _compareEdB->setDarkMode(_prefs.darkMode);
+    _compareEdA->applyLanguage(edA->currentLanguage());
+    _compareEdB->applyLanguage(edB->currentLanguage());
+
+    _compareWidget = new CompareWidget(_compareEdA, _compareEdB, _prefs.darkMode, this);
+    connect(_compareWidget, &CompareWidget::diffNavigated, this, [this](int cur, int total) {
+        if (!_compareWidget) return;
+        if (total > 0) {
+            statusBar()->showMessage(tr("比对完成：%1 处新增，%2 处删除，%3 处修改 | 差异 %4/%5")
+                .arg(_compareWidget->addedCount())
+                .arg(_compareWidget->removedCount())
+                .arg(_compareWidget->modifiedCount())
+                .arg(cur).arg(total));
+        } else {
+            statusBar()->showMessage(tr("文件完全一致，未发现差异"), 4000);
+        }
+    });
+
+    setCentralWidget(_compareWidget);
+
+    if (_actClearCompare) _actClearCompare->setEnabled(true);
+    if (_actNextDiff) _actNextDiff->setEnabled(_compareWidget->totalDiffCount() > 0);
+    if (_actPrevDiff) _actPrevDiff->setEnabled(_compareWidget->totalDiffCount() > 0);
+}
+
+void MainWindow::onCloseCompare() {
+    if (!_compareWidget) return;
+
+    CompareWidget* cmp = _compareWidget;
+    _compareWidget = nullptr;
+
+    cmp->clearDiff();
+    cmp->setParent(nullptr);   // 脱离主窗口布局所有权，避免 setCentralWidget 误删
+    setCentralWidget(_tabManager);
+    delete cmp;                // 析构会把两个副本编辑器 detach
+
+    delete _compareEdA;
+    _compareEdA = nullptr;
+    delete _compareEdB;
+    _compareEdB = nullptr;
+
+    if (_actClearCompare) _actClearCompare->setEnabled(false);
+    if (_actNextDiff) _actNextDiff->setEnabled(false);
+    if (_actPrevDiff) _actPrevDiff->setEnabled(false);
+
+    updateStatusBar(_tabManager->currentEditor());
+}
+
+void MainWindow::onNextDiff() {
+    if (_compareWidget) {
+        _compareWidget->nextDiff();
+    }
+}
+
+void MainWindow::onPrevDiff() {
+    if (_compareWidget) {
+        _compareWidget->prevDiff();
+    }
+}
+
 void MainWindow::onToggleDarkMode(bool enabled) {
     _isDarkMode = enabled;
     _prefs.darkMode = enabled;
     applyDarkModePalette(enabled);
     refreshToolBarIcons(); // 图标前景色分深/浅两套，必须随主题重建
     _tabManager->setDarkMode(enabled);
+    if (_compareWidget) {
+        _compareWidget->setDarkMode(enabled);
+    }
     for (int i = 0; i < _tabManager->count(); ++i) {
         if (auto* ed = _tabManager->editorAt(i)) {
             ed->setDarkMode(enabled);

@@ -151,6 +151,7 @@ set(APP_SOURCES
     src/widgets/TitleBar.cpp
     src/widgets/FolderTreePane.cpp
     src/widgets/HexView.cpp
+    src/widgets/CompareWidget.cpp
     src/dialogs/FindReplaceDialog.cpp
     src/dialogs/GoToLineDialog.cpp
     src/dialogs/ColumnEditorDialog.cpp
@@ -169,6 +170,7 @@ set(APP_SOURCES
     src/utils/JsonFormatter.cpp
     src/utils/StartupNotify.cpp
     src/utils/SingleInstance.cpp
+    src/utils/DiffEngine.cpp
 )
 
 # 主程序与回归测试复用同一批应用对象文件：抽成 OBJECT 库，避免把 22 个 .cpp 编两遍。

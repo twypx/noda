@@ -654,6 +654,16 @@ std::string EditorView::currentTextUtf8() const {
     return buf;
 }
 
+std::string_view EditorView::currentTextView() const {
+    auto* self = const_cast<EditorView*>(this);
+    const sptr_t len = self->send(SCI_GETLENGTH);
+    if (len <= 0) return std::string_view();
+    const char* ptr = reinterpret_cast<const char*>(
+        self->send(SCI_GETRANGEPOINTER, 0, static_cast<sptr_t>(len)));
+    if (!ptr) return std::string_view();
+    return std::string_view(ptr, static_cast<size_t>(len));
+}
+
 void EditorView::setTextFromUtf8(const std::string& utf8) {
     // 恢复出来的内容属于“未保存的修改”，不能进入撤销栈：否则一次 Ctrl+Z 就回到空文档，
     // 看起来像内容全丢了。清栈后把 savepoint 停在当前内容上，

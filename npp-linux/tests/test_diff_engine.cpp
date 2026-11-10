@@ -1,0 +1,328 @@
+#include "test_diff_engine.h"
+#include "utils/DiffEngine.h"
+#include <QCheckBox>
+#include <QElapsedTimer>
+
+void TestDiffEngine::identicalTextYieldsNoDiff()
+{
+    const std::string text = "Line 1\nLine 2\nLine 3\nLine 4\n";
+    Diff::DiffOptions opt;
+    auto res = Diff::DiffEngine::computeDiff(text, text, opt);
+
+    QCOMPARE(res.addedCount, 0);
+    QCOMPARE(res.removedCount, 0);
+    QCOMPARE(res.modifiedCount, 0);
+    for (const auto& l : res.lines) {
+        QCOMPARE(l.type, Diff::ChangeType::Unchanged);
+    }
+}
+
+void TestDiffEngine::pureAddAndRemove()
+{
+    const std::string textA = "Line 1\nLine 2\nLine 3\n";
+    const std::string textB = "Line 1\nLine inserted\nLine 2\n";
+
+    Diff::DiffOptions opt;
+    auto res = Diff::DiffEngine::computeDiff(textA, textB, opt);
+
+    QVERIFY(res.addedCount > 0 || res.modifiedCount > 0);
+    // Line inserted should be present in B
+    bool foundInserted = false;
+    for (const auto& l : res.lines) {
+        if (l.type == Diff::ChangeType::Added) {
+            foundInserted = true;
+        }
+    }
+    QVERIFY(foundInserted);
+
+    // Test pure removal
+    const std::string textC = "Line 1\nLine 3\n";
+    auto res2 = Diff::DiffEngine::computeDiff(textA, textC, opt);
+    QVERIFY(res2.removedCount > 0);
+}
+
+void TestDiffEngine::modifiedLineAndIntraLineDiff()
+{
+    const std::string textA = "const int count = 100;\n";
+    const std::string textB = "const int total = 100;\n";
+
+    Diff::DiffOptions opt;
+    auto res = Diff::DiffEngine::computeDiff(textA, textB, opt);
+
+    // 行数与 Scintilla 一致：末尾换行后还有一空行（Modified + Unchanged）。
+    QCOMPARE(res.lines.size(), static_cast<size_t>(2));
+    QCOMPARE(res.lines[0].type, Diff::ChangeType::Modified);
+    QCOMPARE(res.modifiedCount, 1);
+
+    // 行内差异必须落在 "count" -> "total" 这 5 个字符区间 [10,15) 内；
+    // 真实的字符级 diff 可能给出多段，而不是把整词当作一段。
+    QVERIFY(!res.lines[0].intraA.empty());
+    QVERIFY(!res.lines[0].intraB.empty());
+    for (const auto& r : res.lines[0].intraA) {
+        QVERIFY2(r.start >= 10 && r.start + r.length <= 15, "intraA range out of 'count'");
+        QVERIFY(r.length > 0);
+    }
+    for (const auto& r : res.lines[0].intraB) {
+        QVERIFY2(r.start >= 10 && r.start + r.length <= 15, "intraB range out of 'total'");
+        QVERIFY(r.length > 0);
+    }
+}
+
+void TestDiffEngine::ignoreWhitespaceAndCase()
+{
+    const std::string textA = "   Hello World   \n";
+    const std::string textB = "hello world\n";
+
+    Diff::DiffOptions optStrict;
+    auto resStrict = Diff::DiffEngine::computeDiff(textA, textB, optStrict);
+    QVERIFY(resStrict.modifiedCount > 0 || resStrict.addedCount > 0);
+
+    Diff::DiffOptions optIgnore;
+    optIgnore.ignoreWhitespace = true;
+    optIgnore.ignoreCase = true;
+    auto resIgnore = Diff::DiffEngine::computeDiff(textA, textB, optIgnore);
+    QCOMPARE(resIgnore.addedCount, 0);
+    QCOMPARE(resIgnore.removedCount, 0);
+    QCOMPARE(resIgnore.modifiedCount, 0);
+}
+
+void TestDiffEngine::alignmentMappingCalculatesCorrectVirtualRows()
+{
+    const std::string textA = "A\nB\nC\n";
+    const std::string textB = "A\nINS\nB\nC\n";
+
+    Diff::DiffOptions opt;
+    auto res = Diff::DiffEngine::computeDiff(textA, textB, opt);
+    auto align = Diff::DiffEngine::computeAlignment(res, 3, 4);
+
+    // Alignment list should align A with A, blank on A side for INS on B side, B with B, C with C,
+    // 以及末尾换行后的空行（两侧各一行）。
+    QCOMPARE(align.size(), static_cast<size_t>(5));
+    QCOMPARE(align[0].lineA, 0);
+    QCOMPARE(align[0].lineB, 0);
+    QCOMPARE(align[0].type, Diff::ChangeType::Unchanged);
+
+    // Row 1: A side has blank (-1), B side has 1 ("INS")
+    QCOMPARE(align[1].lineA, -1);
+    QCOMPARE(align[1].lineB, 1);
+    QCOMPARE(align[1].type, Diff::ChangeType::Added);
+
+    // Row 2: B with B
+    QCOMPARE(align[2].lineA, 1);
+    QCOMPARE(align[2].lineB, 2);
+
+    // Row 3: C with C
+    QCOMPARE(align[3].lineA, 2);
+    QCOMPARE(align[3].lineB, 3);
+
+    // Row 4: trailing empty line
+    QCOMPARE(align[4].lineA, 3);
+    QCOMPARE(align[4].lineB, 4);
+}
+
+void TestDiffEngine::multiSegmentIntraLineDiff()
+{
+    const std::string textA = "abcXdefYghi\n";
+    const std::string textB = "abcZdefWghi\n";
+
+    Diff::DiffOptions opt;
+    auto res = Diff::DiffEngine::computeDiff(textA, textB, opt);
+
+    QCOMPARE(res.modifiedCount, 1);
+    QCOMPARE(res.lines.size(), static_cast<size_t>(2)); // Modified + trailing empty
+    const auto& diff = res.lines[0];
+    QCOMPARE(diff.type, Diff::ChangeType::Modified);
+
+    // 两处独立修改必须得到两段区间，而不是被合并成一大段。
+    QCOMPARE(diff.intraA.size(), static_cast<size_t>(2));
+    QCOMPARE(diff.intraB.size(), static_cast<size_t>(2));
+    QCOMPARE(diff.intraA[0].start, 3); // X
+    QCOMPARE(diff.intraA[0].length, 1);
+    QCOMPARE(diff.intraA[1].start, 7); // Y
+    QCOMPARE(diff.intraA[1].length, 1);
+    QCOMPARE(diff.intraB[0].start, 3); // Z
+    QCOMPARE(diff.intraB[1].start, 7); // W
+}
+
+// 最坏情况：两份文档每一行都不同、无任何锚点。必须走有界路径，不能 O(N²) 爆内存。
+void TestDiffEngine::worstCaseAllLinesDifferentIsBounded()
+{
+    constexpr int kLines = 20000;
+    std::string textA;
+    std::string textB;
+    textA.reserve(static_cast<size_t>(kLines) * 16);
+    textB.reserve(static_cast<size_t>(kLines) * 16);
+    for (int i = 0; i < kLines; ++i) {
+        textA += "A_" + std::to_string(i) + "\n";
+        textB += "B_" + std::to_string(i) + "\n";
+    }
+
+    QElapsedTimer timer;
+    timer.start();
+    Diff::DiffOptions opt;
+    auto res = Diff::DiffEngine::computeDiff(textA, textB, opt);
+    const qint64 elapsedMs = timer.elapsed();
+
+    QVERIFY2(elapsedMs < 500, qPrintable(QStringLiteral("worst-case diff too slow: %1 ms").arg(elapsedMs)));
+    // 整块替换按位置配对：每行都应是 Modified。
+    QCOMPARE(res.modifiedCount, kLines);
+    QCOMPARE(res.addedCount, 0);
+    QCOMPARE(res.removedCount, 0);
+}
+
+// 只在头部插入一行：应通过锚点/LIS 快速定位，而不是全量 Myers。
+void TestDiffEngine::shiftedFileUsesAnchorsAndIsFast()
+{
+    constexpr int kLines = 20000;
+    std::string base;
+    base.reserve(static_cast<size_t>(kLines) * 16);
+    for (int i = 0; i < kLines; ++i) {
+        base += "line_" + std::to_string(i) + "\n";
+    }
+    const std::string textA = base;
+    const std::string textB = "INSERTED\n" + base;
+
+    QElapsedTimer timer;
+    timer.start();
+    Diff::DiffOptions opt;
+    auto res = Diff::DiffEngine::computeDiff(textA, textB, opt);
+    const qint64 elapsedMs = timer.elapsed();
+
+    QVERIFY2(elapsedMs < 300, qPrintable(QStringLiteral("anchored diff too slow: %1 ms").arg(elapsedMs)));
+    QCOMPARE(res.addedCount, 1);
+    QCOMPARE(res.removedCount, 0);
+    QCOMPARE(res.modifiedCount, 0);
+}
+
+#include "widgets/CompareWidget.h"
+#include "EditorView.h"
+
+void TestDiffEngine::compareWidgetRendersMarkersAndAnnotations()
+{
+    auto* edA = new EditorView();
+    auto* edB = new EditorView();
+    edA->setTextFromUtf8("Line 1\nLine 2 to modify\nLine 3\n");
+    edB->setTextFromUtf8("Line 1\nLine 2 modified!\nLine inserted\nLine 3\n");
+
+    {
+        CompareWidget cmpWidget(edA, edB);
+
+        QVERIFY(cmpWidget.totalDiffCount() > 0);
+        QCOMPARE(cmpWidget.modifiedCount(), 1);
+        QCOMPARE(cmpWidget.addedCount(), 1);
+
+        // 检查 Marker 标记是否存在
+        auto maskA = edA->send(SCI_MARKERGET, 1);
+        QVERIFY(maskA & (1 << CompareWidget::MARK_DIFF_MODIFIED));
+
+        auto maskB_mod = edB->send(SCI_MARKERGET, 1);
+        QVERIFY(maskB_mod & (1 << CompareWidget::MARK_DIFF_MODIFIED));
+
+        auto maskB_add = edB->send(SCI_MARKERGET, 2);
+        QVERIFY(maskB_add & (1 << CompareWidget::MARK_DIFF_ADDED));
+
+        // 导航测试
+        cmpWidget.nextDiff();
+        QVERIFY(cmpWidget.currentDiffIndex() >= 0);
+
+        // 清理测试
+        cmpWidget.clearDiff();
+        QCOMPARE(edA->send(SCI_MARKERGET, 1), 0);
+        QCOMPARE(edB->send(SCI_MARKERGET, 2), 0);
+    }
+
+    delete edA;
+    delete edB;
+}
+
+void TestDiffEngine::compareWidgetIgnoreOptions()
+{
+    auto* edA = new EditorView();
+    auto* edB = new EditorView();
+    edA->setTextFromUtf8("   Hello World   \n");
+    edB->setTextFromUtf8("hello world\n");
+
+    {
+        CompareWidget cmpWidget(edA, edB);
+        QVERIFY(cmpWidget.modifiedCount() > 0 || cmpWidget.addedCount() > 0);
+
+        const auto boxes = cmpWidget.findChildren<QCheckBox*>();
+        QCOMPARE(boxes.size(), 2);
+        for (QCheckBox* box : boxes) box->setChecked(true);
+
+        QCOMPARE(cmpWidget.modifiedCount(), 0);
+        QCOMPARE(cmpWidget.addedCount(), 0);
+        QCOMPARE(cmpWidget.removedCount(), 0);
+        QCOMPARE(cmpWidget.totalDiffCount(), 0);
+
+        cmpWidget.clearDiff();
+    }
+
+    delete edA;
+    delete edB;
+}
+
+#include "MainWindow.h"
+#include "TabManager.h"
+
+void TestDiffEngine::mainWindowCompareActions()
+{
+    MainWindow win;
+    win.show();
+
+    auto* tabMgr = win.findChild<TabManager*>();
+    QVERIFY(tabMgr != nullptr);
+
+    // 默认已有 1 个标签，再建 1 个标签
+    tabMgr->createNewTab();
+    QVERIFY(tabMgr->count() >= 2);
+
+    auto* ed1 = tabMgr->editorAt(0);
+    auto* ed2 = tabMgr->editorAt(1);
+    QVERIFY(ed1 != nullptr && ed2 != nullptr);
+
+    ed1->setTextFromUtf8("hello\nworld\n");
+    ed2->setTextFromUtf8("hello\nmodified world\n");
+
+    auto* actCompare = win.findChild<QAction*>("actCompare");
+    auto* actClear = win.findChild<QAction*>("actClearCompare");
+    auto* actNext = win.findChild<QAction*>("actNextDiff");
+    auto* actPrev = win.findChild<QAction*>("actPrevDiff");
+
+    QVERIFY(actCompare != nullptr);
+    QVERIFY(actClear != nullptr);
+    QVERIFY(actNext != nullptr);
+    QVERIFY(actPrev != nullptr);
+
+    QVERIFY(!actClear->isEnabled());
+
+    // 触发对比
+    actCompare->trigger();
+
+    auto* cmpWidget = win.findChild<CompareWidget*>();
+    QVERIFY(cmpWidget != nullptr);
+    QCOMPARE(win.centralWidget(), cmpWidget);
+    // 比对必须使用独立副本，绝不能把 TabManager 的页面抢进 splitter。
+    QVERIFY(cmpWidget->editorA() != ed1);
+    QVERIFY(cmpWidget->editorB() != ed2);
+    QVERIFY(actClear->isEnabled());
+    QVERIFY(actNext->isEnabled());
+    QVERIFY(actPrev->isEnabled());
+
+    // 差异导航
+    actNext->trigger();
+    QVERIFY(cmpWidget->currentDiffIndex() >= 0);
+
+    // 关闭对比
+    actClear->trigger();
+    QCOMPARE(win.centralWidget(), tabMgr);
+    QVERIFY(!actClear->isEnabled());
+    QVERIFY(!actNext->isEnabled());
+
+    // 关闭对比后，原标签页与编辑器必须仍然完好可用。
+    QCOMPARE(tabMgr->count() >= 2, true);
+    QCOMPARE(tabMgr->editorAt(0), ed1);
+    QCOMPARE(tabMgr->editorAt(1), ed2);
+    QCOMPARE(QString::fromStdString(ed1->currentTextUtf8()), QStringLiteral("hello\nworld\n"));
+    QCOMPARE(QString::fromStdString(ed2->currentTextUtf8()), QStringLiteral("hello\nmodified world\n"));
+}

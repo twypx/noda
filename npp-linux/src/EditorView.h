@@ -4,6 +4,7 @@
 #include "DocumentBuffer.h"
 #include <functional>
 #include <memory>
+#include <string_view>
 #include <QPair>
 #include <QString>
 
@@ -49,6 +50,9 @@ public:
     // 不要把 setTextFromUtf8 当成"打开文件"用：它不动文件路径、编码与语言，
     // 这些由调用方按 session.xml 里记录的值回填，才能保证下次保存仍按原编码写回。
     std::string currentTextUtf8() const;
+    // 零拷贝：直接返回 Scintilla 内部 UTF-8 缓冲视图。仅在文档不被修改期间有效，
+    // 供比对/统计等只读同步计算使用，避免整份文本拷贝。
+    std::string_view currentTextView() const;
     void setTextFromUtf8(const std::string& utf8);
     // 用格式化结果整篇替换：单步可撤销，并把光标/视口按“非空白字符序号”映射回原逻辑位置。
     // 仅接受只改空白的结果；与当前内容相同则不做任何事。

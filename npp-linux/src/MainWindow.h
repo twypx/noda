@@ -45,10 +45,13 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent*) override { emit doubleClicked(); }
 };
 
+class CompareWidget;
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+    ~MainWindow() override;
     void openFile(const QString& filePath);
 
     // 设置左侧目录树的根并显示它；从 onOpenFolder() 与回归测试共用同一入口，
@@ -219,6 +222,12 @@ private slots:
     // 帮助菜单
     void onAbout();
 
+    // 文件对比
+    void onCompareFiles();
+    void onCloseCompare();
+    void onNextDiff();
+    void onPrevDiff();
+
     // 内部事件
     void onActiveEditorChanged(EditorView* editor);
     void onCursorChanged(int line, int col);
@@ -329,6 +338,13 @@ private:
     QAction* _actDarkMode{nullptr};
     QAction* _actAbout{nullptr};
     QAction* _actViewHex{nullptr};
+    QAction* _actCompare{nullptr};
+    QAction* _actClearCompare{nullptr};
+    QAction* _actNextDiff{nullptr};
+    QAction* _actPrevDiff{nullptr};
+    CompareWidget* _compareWidget{nullptr};
+    EditorView* _compareEdA{nullptr};   // 比对用独立副本，绝不占用 TabManager 的页面
+    EditorView* _compareEdB{nullptr};
 
     // 状态栏控件
     QLabel* _statusPosLabel{nullptr};

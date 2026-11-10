@@ -12,6 +12,8 @@
     <file alias="folder-open_32.png">icons/toolbar/dark/folder-open_32.png</file>
     <file alias="folder-tree_16.png">icons/toolbar/dark/folder-tree_16.png</file>
     <file alias="folder-tree_32.png">icons/toolbar/dark/folder-tree_32.png</file>
+    <file alias="git-compare_16.png">icons/toolbar/dark/git-compare_16.png</file>
+    <file alias="git-compare_32.png">icons/toolbar/dark/git-compare_32.png</file>
     <file alias="indent-guide_16.png">icons/toolbar/dark/indent-guide_16.png</file>
     <file alias="indent-guide_32.png">icons/toolbar/dark/indent-guide_32.png</file>
     <file alias="info_16.png">icons/toolbar/dark/info_16.png</file>
@@ -60,6 +62,8 @@
     <file alias="folder-open_32.png">icons/toolbar/light/folder-open_32.png</file>
     <file alias="folder-tree_16.png">icons/toolbar/light/folder-tree_16.png</file>
     <file alias="folder-tree_32.png">icons/toolbar/light/folder-tree_32.png</file>
+    <file alias="git-compare_16.png">icons/toolbar/light/git-compare_16.png</file>
+    <file alias="git-compare_32.png">icons/toolbar/light/git-compare_32.png</file>
     <file alias="indent-guide_16.png">icons/toolbar/light/indent-guide_16.png</file>
     <file alias="indent-guide_32.png">icons/toolbar/light/indent-guide_32.png</file>
     <file alias="info_16.png">icons/toolbar/light/info_16.png</file>

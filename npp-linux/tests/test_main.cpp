@@ -22,6 +22,7 @@
 #include "test_url_link.h"
 #include "test_hex_view.h"
 #include "test_localization.h"
+#include "test_diff_engine.h"
 
 int main(int argc, char* argv[]) {
     // QSettings 的默认路径在 QCoreApplication 构造时确定，隔离必须在此之前。
@@ -74,6 +75,8 @@ int main(int argc, char* argv[]) {
     failures += QTest::qExec(&testHexView, argc, argv);
     TestLocalization testLocalization;
     failures += QTest::qExec(&testLocalization, argc, argv);
+    TestDiffEngine testDiffEngine;
+    failures += QTest::qExec(&testDiffEngine, argc, argv);
 
     return failures == 0 ? 0 : 1;
 }
