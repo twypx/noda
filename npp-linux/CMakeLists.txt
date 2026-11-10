@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(NotepadPlusPlus_Linux
-    VERSION 1.0.12
+    VERSION 1.0.13
     LANGUAGES CXX C)
 
 add_compile_definitions(NPP_VERSION_STRING="${PROJECT_VERSION}")
@@ -152,6 +152,7 @@ set(APP_SOURCES
     src/widgets/FolderTreePane.cpp
     src/widgets/HexView.cpp
     src/widgets/CompareWidget.cpp
+    src/widgets/DiffMiniMap.cpp
     src/dialogs/FindReplaceDialog.cpp
     src/dialogs/GoToLineDialog.cpp
     src/dialogs/ColumnEditorDialog.cpp
@@ -171,6 +172,7 @@ set(APP_SOURCES
     src/utils/StartupNotify.cpp
     src/utils/SingleInstance.cpp
     src/utils/DiffEngine.cpp
+    src/utils/ConfigMigration.cpp
 )
 
 # 主程序与回归测试复用同一批应用对象文件：抽成 OBJECT 库，避免把 22 个 .cpp 编两遍。
