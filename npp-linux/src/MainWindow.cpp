@@ -148,6 +148,8 @@ MainWindow::MainWindow(QWidget* parent)
     setupTitleBar();
     setupToolBar();
     setupStatusBar();
+    connect(&LocalizationManager::instance(), &LocalizationManager::languageChanged,
+            this, &MainWindow::refreshStatusBarText);
     setupFolderTree();
     loadRecentFiles();
 
@@ -728,8 +730,14 @@ void MainWindow::refreshToolBarIcons() {
 
 void MainWindow::setupStatusBar() {
     auto* bar = statusBar();
-    _statusPosLabel = new QLabel("行: 1  列: 1", this);
-    _statusLengthLabel = new QLabel("长度: 0  行数: 1", this);
+    // 状态栏文本在运行期按当前语言拼接，不能只靠 Show 时的一次性翻译。
+    _statusPosLabel = new QLabel(
+        LocalizationManager::instance().translate(QStringLiteral("行: %1  列: %2")).arg(1).arg(1), this);
+    _statusLengthLabel = new QLabel(
+        LocalizationManager::instance().translate(QStringLiteral("长度: %1  行数: %2")).arg(0).arg(1), this);
+    // 这两块是运行期按模板拼接的动态文本，禁止翻译器记录/回滚，否则切语言后会被撤回。
+    _statusPosLabel->setProperty("nppNoL10n", true);
+    _statusLengthLabel->setProperty("nppNoL10n", true);
     _statusLineEndingLabel = new ClickableLabel("Unix (LF)", this);
     _statusEncodingLabel = new ClickableLabel("UTF-8", this);
     _statusLangLabel = new QLabel("纯文本", this);
@@ -1942,8 +1950,10 @@ void MainWindow::applyPreferences(const AppPreferences& prefs, bool force) {
         applyUiFonts(prefs);
 
     // 界面语言运行时切换，不需要重启。
-    if (force || old.uiLanguage != prefs.uiLanguage)
+    if (force || old.uiLanguage != prefs.uiLanguage) {
         LocalizationManager::instance().setLanguage(prefs.uiLanguage);
+        refreshStatusBarText();
+    }
 
     // _isDarkMode 本身就是“当前已应用状态”，启动时不需要 force。
     const bool darkChanged = old.darkMode != prefs.darkMode || prefs.darkMode != _isDarkMode;
@@ -2368,11 +2378,13 @@ void MainWindow::syncWindowTitle() {
 }
 
 void MainWindow::onCursorChanged(int line, int col) {
-    _statusPosLabel->setText(QString("行: %1  列: %2").arg(line).arg(col));
+    _statusPosLabel->setText(
+        LocalizationManager::instance().translate(QStringLiteral("行: %1  列: %2")).arg(line).arg(col));
     if (auto* ed = _tabManager->currentEditor()) {
         auto len = ed->send(SCI_GETLENGTH);
         auto lineCount = ed->send(SCI_GETLINECOUNT);
-        _statusLengthLabel->setText(QString("长度: %1  行数: %2").arg(len).arg(lineCount));
+        _statusLengthLabel->setText(
+            LocalizationManager::instance().translate(QStringLiteral("长度: %1  行数: %2")).arg(len).arg(lineCount));
     }
 }
 
@@ -2383,7 +2395,29 @@ void MainWindow::updateStatusBar(EditorView* editor) {
     if (_statusLineEndingLabel) _statusLineEndingLabel->setText(QString::fromStdString(buf->getLineEndingString()));
     auto len = editor->send(SCI_GETLENGTH);
     auto lineCount = editor->send(SCI_GETLINECOUNT);
-    if (_statusLengthLabel) _statusLengthLabel->setText(QString("长度: %1  行数: %2").arg(len).arg(lineCount));
+    if (_statusLengthLabel)
+        _statusLengthLabel->setText(
+            LocalizationManager::instance().translate(QStringLiteral("长度: %1  行数: %2")).arg(len).arg(lineCount));
+}
+
+// 语言切换后按当前语言重刷状态栏；无打开的文档时也更新位置/长度两块占位文本。
+void MainWindow::refreshStatusBarText() {
+    EditorView* ed = _tabManager ? _tabManager->currentEditor() : nullptr;
+    if (ed) {
+        const sptr_t pos = ed->send(SCI_GETCURRENTPOS);
+        const int line = static_cast<int>(ed->send(SCI_LINEFROMPOSITION, pos)) + 1;
+        const int col = static_cast<int>(ed->send(SCI_GETCOLUMN, pos)) + 1;
+        onCursorChanged(line, col);
+        updateStatusBar(ed);
+        updateLanguageUI(QString::fromStdString(ed->currentLanguage()));
+        return;
+    }
+    if (_statusPosLabel)
+        _statusPosLabel->setText(
+            LocalizationManager::instance().translate(QStringLiteral("行: %1  列: %2")).arg(1).arg(1));
+    if (_statusLengthLabel)
+        _statusLengthLabel->setText(
+            LocalizationManager::instance().translate(QStringLiteral("长度: %1  行数: %2")).arg(0).arg(1));
 }
 
 void MainWindow::onFileChangedOnDisk(const QString& path) {

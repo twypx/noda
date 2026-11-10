@@ -32,6 +32,10 @@ public:
     void applyToAll();
     void applyToWidget(QWidget* root);
 
+signals:
+    // 语言实际发生切换后发出；运行期拼接的文本（状态栏等）据此自刷新。
+    void languageChanged();
+
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -41,6 +45,8 @@ private:
     void ensureLoaded();
     void loadDictionaries();
     QString sourceText(QObject* object, const char* property, const QString& current);
+    // 处理 "名称 (Ctrl+S)" / "名称(X)" 形式的 tooltip：翻译主体，保留快捷键/助记符后缀。
+    QString translateTooltip(const QString& source) const;
     void translateObject(QObject* object);
     void translateTreeItem(QTreeWidgetItem* item);
     void translateComboBox(QComboBox* combo);

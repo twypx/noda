@@ -260,6 +260,110 @@ const QHash<QString, QString>& extraDictionary() {
         {QStringLiteral("是否保存对文件 %1 的更改？"), QStringLiteral("Save changes to %1?")},
         {QStringLiteral("是(&Y)"), QStringLiteral("&Yes")},
         {QStringLiteral("否(&N)"), QStringLiteral("&No")},
+
+        // ---- 工具栏 / 菜单动作（图标模式下文字不可见，但 tooltip 会用到）----
+        {QStringLiteral("新建"), QStringLiteral("New")},
+        {QStringLiteral("打开"), QStringLiteral("Open")},
+        {QStringLiteral("保存"), QStringLiteral("Save")},
+        {QStringLiteral("全部保存"), QStringLiteral("Save All")},
+        {QStringLiteral("关闭"), QStringLiteral("Close")},
+        {QStringLiteral("全部关闭"), QStringLiteral("Close All")},
+        {QStringLiteral("打印"), QStringLiteral("Print")},
+        {QStringLiteral("剪切"), QStringLiteral("Cut")},
+        {QStringLiteral("复制"), QStringLiteral("Copy")},
+        {QStringLiteral("粘贴"), QStringLiteral("Paste")},
+        {QStringLiteral("撤销"), QStringLiteral("Undo")},
+        {QStringLiteral("恢复"), QStringLiteral("Redo")},
+        {QStringLiteral("查找"), QStringLiteral("Find")},
+        {QStringLiteral("替换"), QStringLiteral("Replace")},
+        {QStringLiteral("代码格式化"), QStringLiteral("Format Code")},
+        {QStringLiteral("放大"), QStringLiteral("Zoom In")},
+        {QStringLiteral("缩小"), QStringLiteral("Zoom Out")},
+        {QStringLiteral("以十六进制查看"), QStringLiteral("View as Hex")},
+        {QStringLiteral("切换书签"), QStringLiteral("Toggle Bookmark")},
+        {QStringLiteral("清除近期文件列表"), QStringLiteral("Clear Recent Files List")},
+        {QStringLiteral("主工具栏"), QStringLiteral("Main toolbar")},
+
+        // ---- 菜单动作（带助记符与无助记符两种形态）----
+        {QStringLiteral("帮助(&H)"), QStringLiteral("&Help")},
+        {QStringLiteral("帮助(H)"), QStringLiteral("Help")},
+        {QStringLiteral("重新载入文件(&L)"), QStringLiteral("Re&load from Disk")},
+        {QStringLiteral("重新载入文件(L)"), QStringLiteral("Reload from Disk")},
+        {QStringLiteral("代码格式化(&F)"), QStringLiteral("&Format Code")},
+        {QStringLiteral("代码格式化(F)"), QStringLiteral("Format Code")},
+        {QStringLiteral("放大(&I)"), QStringLiteral("Zoom &In")},
+        {QStringLiteral("放大(I)"), QStringLiteral("Zoom In")},
+        {QStringLiteral("缩小(&O)"), QStringLiteral("Zoom &Out")},
+        {QStringLiteral("缩小(O)"), QStringLiteral("Zoom Out")},
+        {QStringLiteral("每词首字母大写(&P)"), QStringLiteral("Title &Case")},
+        {QStringLiteral("每词首字母大写(P)"), QStringLiteral("Title Case")},
+        {QStringLiteral("以十六进制查看(&H)"), QStringLiteral("View as &Hex")},
+        {QStringLiteral("以十六进制查看(H)"), QStringLiteral("View as Hex")},
+        {QStringLiteral("用格式标记选中文本(&A)"), QStringLiteral("Mark &Selected Text")},
+        {QStringLiteral("用格式标记选中文本(A)"), QStringLiteral("Mark Selected Text")},
+        {QStringLiteral("展开层次(&U)"), QStringLiteral("Expand &Levels")},
+        {QStringLiteral("展开层次(U)"), QStringLiteral("Expand Levels")},
+
+        // ---- 行操作 / 编辑动作 ----
+        {QStringLiteral("拆分行"), QStringLiteral("Split Lines")},
+        {QStringLiteral("单行注释/取消注释"), QStringLiteral("Toggle Single-Line Comment")},
+        {QStringLiteral("删除当前行"), QStringLiteral("Delete Current Line")},
+        {QStringLiteral("向上移动当前行"), QStringLiteral("Move Current Line Up")},
+        {QStringLiteral("向下移动当前行"), QStringLiteral("Move Current Line Down")},
+        {QStringLiteral("升序排列文本行(忽略大小写)"), QStringLiteral("Sort Lines Ascending (Ignore Case)")},
+        {QStringLiteral("降序排列文本行(忽略大小写)"), QStringLiteral("Sort Lines Descending (Ignore Case)")},
+        {QStringLiteral("空格转 TAB"), QStringLiteral("Spaces to TAB")},
+        {QStringLiteral("日期时间 (长)"), QStringLiteral("Date && Time (long)")},
+        {QStringLiteral("日期时间 (短)"), QStringLiteral("Date && Time (short)")},
+        {QStringLiteral("摘要信息 / 统计信息"), QStringLiteral("Summary / Statistics")},
+        {QStringLiteral("摘要信息 / 统计信息..."), QStringLiteral("Summary / Statistics...")},
+
+        // ---- 折叠层次（1~8）----
+        {QStringLiteral("展开层次 1"), QStringLiteral("Expand Level 1")},
+        {QStringLiteral("展开层次 2"), QStringLiteral("Expand Level 2")},
+        {QStringLiteral("展开层次 3"), QStringLiteral("Expand Level 3")},
+        {QStringLiteral("展开层次 4"), QStringLiteral("Expand Level 4")},
+        {QStringLiteral("展开层次 5"), QStringLiteral("Expand Level 5")},
+        {QStringLiteral("展开层次 6"), QStringLiteral("Expand Level 6")},
+        {QStringLiteral("展开层次 7"), QStringLiteral("Expand Level 7")},
+        {QStringLiteral("展开层次 8"), QStringLiteral("Expand Level 8")},
+        {QStringLiteral("折叠层次 1"), QStringLiteral("Collapse Level 1")},
+        {QStringLiteral("折叠层次 2"), QStringLiteral("Collapse Level 2")},
+        {QStringLiteral("折叠层次 3"), QStringLiteral("Collapse Level 3")},
+        {QStringLiteral("折叠层次 4"), QStringLiteral("Collapse Level 4")},
+        {QStringLiteral("折叠层次 5"), QStringLiteral("Collapse Level 5")},
+        {QStringLiteral("折叠层次 6"), QStringLiteral("Collapse Level 6")},
+        {QStringLiteral("折叠层次 7"), QStringLiteral("Collapse Level 7")},
+        {QStringLiteral("折叠层次 8"), QStringLiteral("Collapse Level 8")},
+
+        // ---- 格式标记（1~5）----
+        {QStringLiteral("使用格式 1"), QStringLiteral("Apply Style 1")},
+        {QStringLiteral("使用格式 2"), QStringLiteral("Apply Style 2")},
+        {QStringLiteral("使用格式 3"), QStringLiteral("Apply Style 3")},
+        {QStringLiteral("使用格式 4"), QStringLiteral("Apply Style 4")},
+        {QStringLiteral("使用格式 5"), QStringLiteral("Apply Style 5")},
+
+        // ---- 编码 / 换行 ----
+        {QStringLiteral("转为编码"), QStringLiteral("Convert to Encoding")},
+        {QStringLiteral("字符集"), QStringLiteral("Character Set")},
+        {QStringLiteral("西欧"), QStringLiteral("Western European")},
+        {QStringLiteral("文档格式转换 (换行符)"), QStringLiteral("Document Format Conversion (Line Endings)")},
+        {QStringLiteral("Batch (批处理)"), QStringLiteral("Batch")},
+
+        // ---- 查找替换对话框 ----
+        {QStringLiteral("查找与替换"), QStringLiteral("Find & Replace")},
+        {QStringLiteral("查找目标:"), QStringLiteral("Find what:")},
+        {QStringLiteral("替换为:"), QStringLiteral("Replace with:")},
+        {QStringLiteral("正则表达式"), QStringLiteral("Regular expression")},
+
+        // ---- 状态栏（模板，参数在运行期填充）----
+        {QStringLiteral("行: %1  列: %2"), QStringLiteral("Line: %1  Col: %2")},
+        {QStringLiteral("长度: %1  行数: %2"), QStringLiteral("Length: %1  Lines: %2")},
+
+        // ---- URL 可点击链接（模块 L）----
+        {QStringLiteral("URL 可点击链接"), QStringLiteral("URL Clickable Links")},
+        {QStringLiteral("自动识别 URL 并加下划线，按住 Ctrl 点击打开"),
+         QStringLiteral("Auto-detect URLs and underline them; Ctrl+Click to open")},
     };
     return map;
 }
@@ -344,6 +448,9 @@ QString LocalizationManager::sourceText(QObject* object, const char* property,
 
 void LocalizationManager::translateObject(QObject* object) {
     if (!object) return;
+    // 由运行期自行拼接的文本（状态栏等）不参与「记录原文 → 回滚」机制，
+    // 否则带数字的整串会被当成原文，切语言后的动态刷新会被 applyToAll 撤回。
+    if (object->property("nppNoL10n").toBool()) return;
     // 文档/输入框内容不能当界面文案翻译。
     if (object->inherits("QLineEdit") || object->inherits("QTextEdit")
         || object->inherits("QPlainTextEdit") || object->inherits("ScintillaEditBase")) {
@@ -360,9 +467,24 @@ void LocalizationManager::translateObject(QObject* object) {
         const QString current = value.toString();
         const QString source = sourceText(object, prop.constData(), current);
         if (source.isEmpty()) continue;
-        const QString translated = translate(source);
+        QString translated = translate(source);
+        // tooltip 常被生成成 "名称 (Ctrl+S)" 或 "名称(X)"：整串查不到时翻译主体、保留后缀。
+        if (translated == source && prop == QByteArray("toolTip")) {
+            translated = translateTooltip(source);
+        }
         if (translated != current) object->setProperty(prop.constData(), translated);
     }
+}
+
+QString LocalizationManager::translateTooltip(const QString& source) const {
+    const int lp = source.lastIndexOf(QLatin1Char('('));
+    if (lp <= 0 || !source.endsWith(QLatin1Char(')'))) return source;
+    const bool spaced = source.at(lp - 1) == QLatin1Char(' ');
+    const QString base = source.left(spaced ? lp - 1 : lp);
+    if (base.isEmpty()) return source;
+    const QString translatedBase = translate(base);
+    if (translatedBase == base) return source;
+    return translatedBase + source.mid(spaced ? lp - 1 : lp);
 }
 
 void LocalizationManager::translateTreeItem(QTreeWidgetItem* item) {
@@ -385,6 +507,12 @@ void LocalizationManager::translateTreeItem(QTreeWidgetItem* item) {
 
 void LocalizationManager::translateComboBox(QComboBox* combo) {
     if (!combo) return;
+    // 语言选择等“原生名称”下拉框不翻译：中文项应始终显示「简体中文」，英文项显示「English」。
+    if (combo->property("nppNoL10n").toBool()) return;
+    for (int i = 0; i < combo->count(); ++i) {
+        const QString data = combo->itemData(i).toString();
+        if (data == QLatin1String("zh_CN") || data == QLatin1String("en_US")) return;
+    }
     for (int i = 0; i < combo->count(); ++i) {
         const QVariant stored = combo->itemData(i, kOriginalTextRole);
         QString source;
@@ -451,6 +579,7 @@ void LocalizationManager::setLanguage(const QString& language) {
     if (_language == normalized) return;
     _language = normalized;
     applyToAll();
+    emit languageChanged();
 }
 
 bool LocalizationManager::eventFilter(QObject* watched, QEvent* event) {

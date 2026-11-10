@@ -1,26 +1,80 @@
-# Notepad++ Linux Port
+<p align="center">
+  <img src="npp-linux/resources/icons/app_256.png" width="112" alt="Notepad++ for Linux logo">
+</p>
 
-Notepad++ 的 Ubuntu / Linux 原生移植：**纯 C++20 + Qt6 Widgets**，编辑核心直接用 Scintilla 的
-Qt 接口（`ScintillaEditBase`），不是 QML、不是 Webview，也不是 Wine 包装。
+<h1 align="center">Notepad++ for Linux</h1>
 
-主要代码在 [`npp-linux/`](npp-linux/)，其中文文档、架构说明与各功能细节以
-**[npp-linux/README.md](npp-linux/README.md)** 为准。
+<p align="center"><b>The fastest native text editor for Linux.</b><br>
+C++20 + Qt6 Widgets · Scintilla/Lexilla core · no Wine, no Electron, no WebView.</p>
 
-## 仓库结构
+<p align="center">
+  <b>English</b> &nbsp;|&nbsp; <a href="docs/README.zh-CN.md">简体中文</a>
+</p>
 
-本仓库自带构建所需的全部第三方源码，因此保持了这个目录层级 —— `npp-linux/CMakeLists.txt`
-用 `NPP_ROOT = ..` 定位依赖，改动结构会直接导致构建失败。
+---
 
-| 路径 | 来源 | 说明 |
+A native Ubuntu/Linux port of Notepad++, built on the original assets and logic
+(`langs.model.xml`, `stylers.model.xml`, uchardet, Scintilla, Lexilla) but rewritten as a
+pure Qt6 Widgets application. It is **not** a Wine wrapper and **not** an Electron app.
+
+The detailed, deep-dive technical documentation lives in
+**[npp-linux/README.md](npp-linux/README.md)**.
+
+## What this port adds over Notepad++
+
+Some features overlap with upstream; the point is that they are **built in, dependency-free,
+and tuned for Linux** — not bolted on through plugins or a compatibility layer.
+
+| Capability | Notepad++ (Windows) | This port |
 |---|---|---|
-| `npp-linux/` | 本移植项目 | 移植本体：主窗口、编辑器封装、各对话框、主题与图标工具链 |
-| `scintilla/` | 上游 vendored | 编辑引擎（文本缓冲、选区、撤销、渲染） |
-| `lexilla/` | 上游 vendored | 词法高亮引擎与各语言 lexer |
-| `PowerEditor/src/uchardet/` | 上游 vendored | 字符编码自动识别（UTF-8 / GBK / Big5 等） |
-| `PowerEditor/src/pugixml/` | 上游 vendored | 解析语言与样式 XML |
-| `PowerEditor/src/langs.model.xml`<br>`PowerEditor/src/stylers.model.xml` | 上游 vendored | 语言定义与主题样式定义，直接复用 Notepad++ 原版资产 |
+| Platform | Windows only | **Native Linux** (X11 + Wayland), `.deb`, `.desktop`, hicolor icons |
+| Runtime | Win32 / GDI | **C++20 + Qt6 Widgets**, ~80–120 ms cold start, ~35–45 MB RSS |
+| Binary / hex view | Via the HexEditor plugin | **Built-in raw-byte viewer** — `mmap`, viewport-only reads, no full-file copy, >4 GB–safe addresses |
+| Folder workspace | "Folder as Workspace" | **Built-in dock** with lazy loading, zero recursive pre-scan, custom branch/indent painting |
+| UI language | `nativeLang/*.xml` | **Runtime English ⇄ 简体中文 switch**, fully bilingual menus, tooltips and status bar |
+| Theme | Built-in themes | **Obsidian-inspired light/dark tokens**, unified UI font (CJK + Latin), native borderless title bar |
+| Code formatting | Plugins / external tools | **Built-in AStyle (C/C++/C#/Java/Obj-C) + JSON formatter**, runs off the UI thread |
+| TypeScript | By lexer config | **`.ts` / `.tsx` highlighting** reusing the cpp lexer with correct properties |
+| Session & backup | Periodic backup | **Session snapshot + auto backup**, unsaved content is restored with the caret position |
 
-## 构建与运行
+## Highlights
+
+- **Performance-first engineering.** Viewport-only smart highlighting with a hard time budget,
+  font-list and theme-metadata singletons, batched tab-bar re-polish, mmap-backed hex viewer,
+  and no speculative dependencies.
+- **A serious, modern UI.** Tree-structured preferences, editable shortcut mapper with conflict
+  detection, style configurator (per language × style slot), and only real, backed toggles —
+  no placeholder switches.
+- **Linux-native integration.** X11 startup-notification fix-up, `%F` file associations,
+  a `register_open_with.py` helper for the desktop context menu, and correct Wayland handling.
+- **Clickable URLs.** URLs are underlined in the visible viewport and open in your default
+  browser on `Ctrl` + click.
+- **Binary files just work.** Files containing NUL bytes automatically open in the hex viewer,
+  showing the true on-disk bytes — not the decoded text buffer.
+
+## Core features
+
+- [x] Multi-tab editing: new / open / save / save-as / save-copy-as, unsaved-change prompts,
+      double-click empty tab bar to create a document.
+- [x] Tab context menu: close / batch-close, save, rename, move to trash, reload, print,
+      read-only, copy path, move tab, open containing folder.
+- [x] Drag-and-drop files (multi-file) and command-line / IPC open.
+- [x] Native Scintilla editing: undo/redo, cut/copy/paste, select-all, column selection.
+- [x] Line numbers, fold margin, current-line highlight, word-wrap toggle.
+- [x] Encoding detection (UTF-8 / GBK / Big5 / UTF-16 …) and EOL detection (LF / CRLF / CR).
+- [x] Fast find & replace: match case, whole word, regex, replace-all.
+- [x] External file-change monitoring via `inotify` with reload prompts.
+- [x] Session memory + automatic backup of unsaved content.
+- [x] Code formatting: AStyle for C-family, order-preserving JSON pretty-printer, worker thread.
+- [x] Style configurator: per language × style slot colours, bold/italic, font family & size.
+- [x] Preferences (tree): theme, UI language, tab bar, auto-completion, highlight matching,
+      UI fonts, editor behaviour — only real, backed options.
+- [x] Shortcut mapper generated from real menu actions; editable, conflict detection, reset.
+- [x] Opening a folder: lazy, dependency-free directory tree in a left dock.
+- [x] Built-in hexadecimal / binary viewer with raw on-disk bytes.
+- [x] TypeScript / TSX syntax highlighting.
+
+## Quick start
 
 ```bash
 sudo apt update
@@ -31,15 +85,42 @@ cd npp-linux
 ./build/notepad-plus-plus-linux
 ```
 
-工具栏与应用图标的 PNG 由 `npp-linux/tools/*.py` 离线生成并内嵌进 Qt 资源，
-常规构建不需要 Python 依赖，也不需要联网或系统图标主题。若要修改图标形态，
-见 `npp-linux/README.md` 的"工具栏图标"一节。
+Package as a `.deb`:
 
-## 许可
+```bash
+cd npp-linux
+./build_deb.sh
+sudo apt install ./build-deb/notepad-plus-plus-linux_*_amd64.deb
+```
 
-- `npp-linux/` 沿用 Notepad++ 上游的 **GPL-3.0**（见根目录 [`LICENSE`](LICENSE)）。
-- `scintilla/` 与 `lexilla/` 为 Neil Hodgson 的宽松许可，见各自的 `License.txt`。
-- `PowerEditor/src/uchardet/` 为 **MPL 1.1 / GPL 2.0 / LGPL 2.1** 三重许可（各文件头部声明）。
-- `PowerEditor/src/pugixml/` 为 **MIT**。
+Toolbar and application icons are generated offline by `npp-linux/tools/*.py` and embedded as
+Qt resources — a normal build needs no Python, no network and no system icon theme.
 
-本移植项目与 Notepad++ 官方项目相互独立，不是官方发布物。
+## Repository layout
+
+This repository vendors every third-party source needed to build, so the directory layout is
+**load-bearing**: `npp-linux/CMakeLists.txt` resolves dependencies via `NPP_ROOT = ..`.
+
+| Path | Origin | Purpose |
+|---|---|---|
+| `npp-linux/` | This port | Application: windows, editor wrapper, dialogs, theme and icon tooling |
+| `scintilla/` | Upstream (vendored) | Editing engine (buffer, selection, undo, rendering) |
+| `lexilla/` | Upstream (vendored) | Lexer engine and per-language lexers |
+| `PowerEditor/src/uchardet/` | Upstream (vendored) | Charset auto-detection |
+| `PowerEditor/src/pugixml/` | Upstream (vendored) | XML parsing for language/style models |
+| `PowerEditor/src/langs.model.xml`<br>`PowerEditor/src/stylers.model.xml` | Upstream (vendored) | Language and theme definitions, reused verbatim |
+
+## Documentation
+
+- Detailed technical documentation (Chinese): **[npp-linux/README.md](npp-linux/README.md)**
+- Development plan and module log: **[docs/开发计划2.md](docs/开发计划2.md)**
+- 简体中文说明: **[docs/README.zh-CN.md](docs/README.zh-CN.md)**
+
+## License
+
+- `npp-linux/` keeps Notepad++'s upstream **GPL-3.0** (see [`LICENSE`](LICENSE)).
+- `scintilla/` and `lexilla/` are under Neil Hodgson's permissive licenses (see each `License.txt`).
+- `PowerEditor/src/uchardet/` is triple-licensed **MPL 1.1 / GPL 2.0 / LGPL 2.1**.
+- `PowerEditor/src/pugixml/` is **MIT**.
+
+This port is independent of the official Notepad++ project and is not an official release.

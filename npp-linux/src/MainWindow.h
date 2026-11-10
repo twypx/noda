@@ -272,6 +272,7 @@ private:
     void addRecentFile(const QString& path);
     void updateRecentFilesMenu();
     void applyPreferencesToEditor(EditorView* ed);
+    void refreshStatusBarText();   // 语言切换后按当前光标/长度重刷状态栏
     void openDroppedUrl(const QUrl& url);
 
     friend class TestMainWindow;

@@ -249,8 +249,10 @@ QWidget* PreferencesDialog::createPageAppearance(const AppPreferences& current) 
     formLayout->setLabelAlignment(Qt::AlignRight);
 
     _langCombo = new QComboBox(page);
-    _langCombo->addItem(tr("简体中文"), QStringLiteral("zh_CN"));
-    _langCombo->addItem(tr("English"), QStringLiteral("en_US"));
+    // 语言选项用各自的“原生名称”，不随界面语言翻译（否则英文模式下会变成 English / English）。
+    _langCombo->setProperty("nppNoL10n", true);
+    _langCombo->addItem(QStringLiteral("简体中文"), QStringLiteral("zh_CN"));
+    _langCombo->addItem(QStringLiteral("English"), QStringLiteral("en_US"));
     const int languageIndex = _langCombo->findData(current.uiLanguage);
     if (languageIndex >= 0) _langCombo->setCurrentIndex(languageIndex);
     formLayout->addRow(tr("界面语言:"), _langCombo);

@@ -1,4 +1,10 @@
-# Notepad++ Linux Port (Qt6 / Widgets Native)
+<p align="center">
+  <img src="resources/icons/app_256.png" width="88" alt="Notepad++ for Linux LOGO">
+</p>
+
+> **详细技术文档（中文）** · English: [../README.md](../README.md) · 简体中文: [../docs/README.zh-CN.md](../docs/README.zh-CN.md)
+
+# Notepad++ Linux 移植（Qt6 / Widgets 原生）— 技术细节
 
 基于 Notepad++ 核心资产与逻辑改造的 Linux 原生高性能实现。
 
