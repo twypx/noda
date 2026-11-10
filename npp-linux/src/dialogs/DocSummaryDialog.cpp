@@ -24,7 +24,7 @@ DocSummaryDialog::DocSummaryDialog(const QString& filePath, const DocSummary& su
     formLayout->addRow("总行数:", new QLabel(QString::number(summary.lines)));
     formLayout->addRow("总字数 (含空白):", new QLabel(QString::number(summary.characters)));
     formLayout->addRow("总字数 (不含空白):", new QLabel(QString::number(summary.charactersNoSpaces)));
-    formLayout->addRow("总词数 (Words):", new QLabel(QString::number(summary.words)));
+    formLayout->addRow("总词数:", new QLabel(QString::number(summary.words)));
 
     if (summary.selCharacters > 0) {
         formLayout->addRow("选区字符数:", new QLabel(QString::number(summary.selCharacters)));

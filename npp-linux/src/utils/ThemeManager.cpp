@@ -1,7 +1,9 @@
 #include "ThemeManager.h"
 #include <QApplication>
+#include <QFont>
 #include <QStyleFactory>
 #include <QPalette>
+#include <QStringList>
 
 namespace {
 
@@ -12,6 +14,9 @@ constexpr const char* kTreeSelectedDark = "#3d3550";
 constexpr const char* kTreeSelectedLight = "#ddd3f5";
 
 bool s_darkTheme = false;
+QFont s_uiFont;
+bool s_uiFontSet = false;
+QStringList s_uiFontFamilies;
 
 // QSS 的 image: 只认固定像素的 PNG，没有 DPR 概念。标签关闭按钮原来直接写死 x_16.png，
 // 2x 屏上它被按逻辑 16px（= 物理 32px）绘制，等于把 16px 原图拉大一倍，看着就是糊的；
@@ -39,11 +44,27 @@ QString dockCloseIcon(bool isDark) {
     return QStringLiteral("url(:/toolbar/%1/%2)").arg(dir, file);
 }
 
-// 样式表里带 DPR / 主题色的占位符在这里落地。必须在拿到 isDark 之后、setStyleSheet 之前做。
+// QSS 里若写死 font-family，QApplication::setFont() 会被样式表覆盖，
+// 首选项里的中/英文字体就永远看不到效果。这里只生成 font-family 声明。
+QString uiFontDeclaration() {
+    if (s_uiFontFamilies.isEmpty()) return QString();
+    QStringList quoted;
+    quoted.reserve(s_uiFontFamilies.size());
+    for (const QString& family : s_uiFontFamilies) {
+        QString escaped = family;
+        escaped.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+        escaped.replace(QLatin1Char('"'), QStringLiteral("\\\""));
+        quoted << QStringLiteral("\"%1\"").arg(escaped);
+    }
+    return QStringLiteral("font-family: %1;").arg(quoted.join(QStringLiteral(", ")));
+}
+
+// 样式表里带 DPR / 主题色 / 界面字体的占位符在这里落地。
 QString finishStyleSheet(const QString& css, bool isDark) {
     QString out = css;
     out.replace(QStringLiteral("@CLOSE_BUTTON_IMAGE@"), closeButtonImage(isDark));
     out.replace(QStringLiteral("@DOCK_CLOSE_ICON@"), dockCloseIcon(isDark));
+    out.replace(QStringLiteral("@UI_FONT_FAMILY_DECL@"), uiFontDeclaration());
     out.replace(QStringLiteral("@TREE_HOVER_COLOR@"),
                 QLatin1String(isDark ? kTreeHoverDark : kTreeHoverLight));
     out.replace(QStringLiteral("@TREE_SELECTED_COLOR@"),
@@ -58,6 +79,16 @@ FolderTreeColors ThemeManager::folderTreeColors() {
     static const FolderTreeColors dark{QColor(kTreeHoverDark), QColor(kTreeSelectedDark)};
     static const FolderTreeColors light{QColor(kTreeHoverLight), QColor(kTreeSelectedLight)};
     return s_darkTheme ? dark : light;
+}
+
+void ThemeManager::setUiFont(const QFont& font, const QStringList& families) {
+    s_uiFont = font;
+    s_uiFontSet = true;
+    s_uiFontFamilies = families;
+    if (!qApp) return;
+    QApplication::setFont(font);
+    // 立刻重建样式表，否则 QSS 里旧的 font-family 会继续覆盖 QApplication 字体。
+    qApp->setStyleSheet(getStyleSheet(s_darkTheme));
 }
 
 QString ThemeManager::getStyleSheet(bool isDark) {
@@ -77,7 +108,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
             QWidget {
                 background-color: #282828;
                 color: #dadada;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Ubuntu", Roboto, "Inter", sans-serif;
+                @UI_FONT_FAMILY_DECL@
                 font-size: 13px;
                 selection-background-color: #7852ee;
                 selection-color: #ffffff;
@@ -225,6 +256,23 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 margin-bottom: -1px;
                 padding-bottom: 4px;
                 font-weight: bold;
+            }
+            /* 紧凑标签由 TabManager 设置 QTabBar 的 compact 动态属性触发。
+               放在选中态之后，且显式给 selected 定高，避免紧凑模式下选中标签跳高。 */
+            QTabBar[compact="true"]::tab {
+                padding: 1px 6px;
+                font-size: 11px;
+            }
+            QTabBar[compact="true"]::tab:selected {
+                padding-top: 1px;
+                padding-bottom: 2px;
+            }
+            /* 上游 TabBar: drawTopBar / drawInactiveTab */
+            QTabBar[activeTopBar="false"]::tab:selected {
+                border-top: 1px solid #333333;
+            }
+            QTabBar[inactiveColored="true"]::tab:!selected {
+                background-color: rgba(255, 255, 255, 0.08);
             }
             QTabBar::close-button {
                 /* 必须显式给 image：QSS 里一旦出现 close-button 规则，Qt 就接管这个
@@ -395,7 +443,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
             QWidget {
                 background-color: #f6f6f6;
                 color: #222222;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Ubuntu", Roboto, "Inter", sans-serif;
+                @UI_FONT_FAMILY_DECL@
                 font-size: 13px;
                 selection-background-color: #ede9fe;
                 selection-color: #222222;
@@ -541,6 +589,22 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 margin-bottom: -1px;
                 padding-bottom: 4px;
                 font-weight: bold;
+            }
+            /* 紧凑标签由 TabManager 设置 QTabBar 的 compact 动态属性触发。 */
+            QTabBar[compact="true"]::tab {
+                padding: 1px 6px;
+                font-size: 11px;
+            }
+            QTabBar[compact="true"]::tab:selected {
+                padding-top: 1px;
+                padding-bottom: 2px;
+            }
+            /* 上游 TabBar: drawTopBar / drawInactiveTab */
+            QTabBar[activeTopBar="false"]::tab:selected {
+                border-top: 1px solid #e4e4e4;
+            }
+            QTabBar[inactiveColored="true"]::tab:!selected {
+                background-color: rgba(0, 0, 0, 0.06);
             }
             QTabBar::close-button {
                 /* 同上：没有 image 的 close-button 规则会把 X 画成空白；
@@ -700,6 +764,8 @@ QString ThemeManager::getStyleSheet(bool isDark) {
 void ThemeManager::applyTheme(bool isDark) {
     s_darkTheme = isDark;
     QApplication::setStyle(QStyleFactory::create("Fusion"));
+    // setStyle() 会重建默认字体；把首选项字体补回去，后续样式表也带同一 font-family。
+    if (s_uiFontSet) QApplication::setFont(s_uiFont);
 
     QPalette p;
     if (isDark) {

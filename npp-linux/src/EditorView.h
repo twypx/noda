@@ -4,7 +4,10 @@
 #include "DocumentBuffer.h"
 #include <functional>
 #include <memory>
+#include <QPair>
 #include <QString>
+
+class QTimer;
 
 struct DocSummary {
     int lines{0};
@@ -135,6 +138,20 @@ public:
     void goToMatchingBrace();
     void selectToMatchingBrace();
 
+    // 首选项「高亮匹配」：选中词的所有出现 / 光标处括号。
+    void setHighlightPrefs(bool matchingWords, bool matchingBraces,
+                           bool matchCase, bool wholeWord);
+    // 立即重算两类高亮（首选项变更与测试用；日常光标移动由内部防抖定时器驱动）。
+    void refreshHighlighting();
+
+    // 首选项「自动补全」：当前文档词补全 + 可选的关键字补全。
+    // type: 0 单词与关键字、1 仅单词。
+    void setAutoCompletion(bool enabled, int minChars, int type, bool ignoreNumbers);
+    // 当前已高亮的括号位置；未高亮时为 (-1, -1)。
+    QPair<int, int> braceHighlightPositions() const {
+        return qMakePair(_braceStart, _braceEnd);
+    }
+
     // 格式标记 (Indicators)
     void markSelectedText(int styleIndex); // 1~5
     void clearMarks();
@@ -222,6 +239,10 @@ private:
     std::string getSelectedOrWordText() const;
     void replaceSelectedText(const std::string& replacement);
 
+    void updateSmartHighlight();
+    void updateBraceHighlight();
+    void updateAutoCompletion(int ch);
+
     std::shared_ptr<DocumentBuffer> _buffer;
     QString _lastSaveError;
     bool _isDarkMode{false};
@@ -233,4 +254,24 @@ private:
     int _fontSize{10};
     // “开始/结束 选取”的第一次调用只记下位置，第二次才真正拉出选区（同 Notepad++）。
     sptr_t _beginSelectPos{-1};
+
+    // 高亮匹配首选项与防抖定时器：拖动选择时不能每移动一像素就全文档搜索一次。
+    bool _hlWords{true};
+    bool _hlBraces{true};
+    bool _hlMatchCase{true};
+    bool _hlWholeWord{false};
+    QString _hlQuery;
+    int _hlFlags{-1};
+    QTimer* _hlTimer{nullptr};
+    // 上一次实际标记过的字节窗口。视口仍落在其中时可跳过重算；滚出缓冲带才重新扫描。
+    sptr_t _hlMarkedStart{0};
+    sptr_t _hlMarkedEnd{0};
+
+    bool _autoCompletion{true};
+    int _autoCompletionMinChars{2};
+    int _autoCompletionType{0};
+    bool _autoCompletionIgnoreNumbers{true};
+
+    int _braceStart{-1};
+    int _braceEnd{-1};
 };

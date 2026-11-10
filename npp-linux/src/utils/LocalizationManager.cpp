@@ -1,0 +1,467 @@
+#include "LocalizationManager.h"
+
+#include "pugixml.hpp"
+
+#include <QAction>
+#include <QApplication>
+#include <QComboBox>
+#include <QCoreApplication>
+#include <QEvent>
+#include <QFile>
+#include <QGroupBox>
+#include <QHeaderView>
+#include <QLabel>
+#include <QLineEdit>
+#include <QMenu>
+#include <QMessageBox>
+#include <QMetaType>
+#include <QPushButton>
+#include <QRegularExpression>
+#include <QSet>
+#include <QSpinBox>
+#include <QTableWidget>
+#include <QTextEdit>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QVariant>
+#include <QWidget>
+#include <cstring>
+
+namespace {
+
+constexpr int kOriginalTextRole = Qt::UserRole + 77;
+const char* kSourcePropertyPrefix = "npp_l10n_source_";
+
+bool hasChinese(const QString& text) {
+    for (QChar ch : text) {
+        if (ch.unicode() >= 0x4E00 && ch.unicode() <= 0x9FFF) return true;
+    }
+    return false;
+}
+
+// 中英文 nativeLang XML 结构一致，用「节点路径 + ID 属性 + 同级序号」做配对键。
+QString nodeSignature(const pugi::xml_node& node) {
+    QStringList parts;
+    for (pugi::xml_node current = node; current; current = current.parent()) {
+        QString part = QString::fromUtf8(current.name());
+        for (const pugi::xml_attribute attr : current.attributes()) {
+            const QString name = QString::fromUtf8(attr.name()).toLower();
+            if (name == QStringLiteral("name") || name == QStringLiteral("version")
+                || name == QStringLiteral("filename")) {
+                continue;
+            }
+            if (name.contains(QStringLiteral("id"))) {
+                part += QLatin1Char('@') + name + QLatin1Char('=')
+                      + QString::fromUtf8(attr.value());
+            }
+        }
+        int siblingIndex = 0;
+        for (pugi::xml_node prev = current.previous_sibling(); prev;
+             prev = prev.previous_sibling()) {
+            if (std::strcmp(prev.name(), current.name()) == 0) ++siblingIndex;
+        }
+        part += QLatin1Char('#') + QString::number(siblingIndex);
+        parts.prepend(part);
+    }
+    return parts.join(QLatin1Char('/'));
+}
+
+void collectNames(const pugi::xml_node& node, QHash<QString, QString>& out) {
+    if (node.type() != pugi::node_element) return;
+    const QString signature = nodeSignature(node);
+    if (const pugi::xml_attribute name = node.attribute("name"))
+        out.insert(signature, QString::fromUtf8(name.value()));
+    if (const pugi::xml_attribute title = node.attribute("title"))
+        out.insert(signature + QStringLiteral("@title"), QString::fromUtf8(title.value()));
+    for (const pugi::xml_node child : node.children()) collectNames(child, out);
+}
+
+bool loadXml(const QString& path, QHash<QString, QString>& out) {
+    pugi::xml_document doc;
+    if (!doc.load_file(path.toUtf8().constData())) return false;
+    collectNames(doc.document_element(), out);
+    return !out.isEmpty();
+}
+
+// 本移植 Linux 专属文案（上游 nativeLang 未覆盖，或中文表述不同）。
+const QHash<QString, QString>& extraDictionary() {
+    static const QHash<QString, QString> map = {
+        {QStringLiteral("首选项"), QStringLiteral("Preferences")},
+        {QStringLiteral("简体中文"), QStringLiteral("Simplified Chinese")},
+        {QStringLiteral("启用深色模式"), QStringLiteral("Enable dark mode")},
+        {QStringLiteral("标签栏与工具栏"), QStringLiteral("Tab Bar && Toolbar")},
+        {QStringLiteral("<h3>标签栏与工具栏</h3>"), QStringLiteral("<h3>Tab Bar && Toolbar</h3>")},
+        {QStringLiteral("隐藏工具栏"), QStringLiteral("Hide toolbar")},
+        {QStringLiteral("禁止拖拽调整标签顺序"), QStringLiteral("Lock tab order")},
+        {QStringLiteral("0 表示不截断；超出长度时以省略号显示。"), QStringLiteral("0 disables truncation; longer labels end with an ellipsis.")},
+        {QStringLiteral("外观和体验"), QStringLiteral("Look && feel")},
+        {QStringLiteral("用空格替代制表符"), QStringLiteral("Replace tabs with spaces")},
+        {QStringLiteral("默认启用自动换行"), QStringLiteral("Enable word wrap by default")},
+        {QStringLiteral("显示行号列"), QStringLiteral("Show line number margin")},
+        {QStringLiteral("显示代码折叠列"), QStringLiteral("Show folding margin")},
+        {QStringLiteral("显示缩进参考线"), QStringLiteral("Show indentation guides")},
+        {QStringLiteral("显示换行符符号"), QStringLiteral("Show end-of-line symbols")},
+        {QStringLiteral("启用字体平滑与亚像素抗锯齿"), QStringLiteral("Enable font smoothing and subpixel antialiasing")},
+        {QStringLiteral("<h3>配色方案</h3>"), QStringLiteral("<h3>Theme</h3>")},
+        {QStringLiteral("默认配色"), QStringLiteral("Default Theme")},
+        {QStringLiteral("主题:"), QStringLiteral("Theme:")},
+        {QStringLiteral("普通文本"), QStringLiteral("Plain Text")},
+        {QStringLiteral("<h3>自动补全</h3>"), QStringLiteral("<h3>Auto-Completion</h3>")},
+        {QStringLiteral("补全设置"), QStringLiteral("Completion Settings")},
+        {QStringLiteral("输入时自动弹出补全候选"), QStringLiteral("Show completion candidates while typing")},
+        {QStringLiteral("单词与关键字补全"), QStringLiteral("Word and keyword completion")},
+        {QStringLiteral("仅单词补全"), QStringLiteral("Word completion only")},
+        {QStringLiteral("<h3>高亮匹配</h3>"), QStringLiteral("<h3>Highlighting</h3>")},
+        {QStringLiteral("标记所选文本的所有匹配项"), QStringLiteral("Highlight all occurrences of the selected text")},
+        {QStringLiteral("区分大小写"), QStringLiteral("Match case")},
+        {QStringLiteral("全词匹配"), QStringLiteral("Whole word only")},
+        {QStringLiteral("符号高亮"), QStringLiteral("Brace Highlighting")},
+        {QStringLiteral("高亮匹配括号"), QStringLiteral("Highlight matching braces")},
+        {QStringLiteral("开启快照后退出时不再询问是否保存：未保存内容会定期写入备份目录，\n下次启动连同光标位置一起恢复。"),
+         QStringLiteral("With snapshots enabled, unsaved content is periodically written to the backup folder;\nit is restored with the caret position on the next launch.")},
+        {QStringLiteral("界面语言:"), QStringLiteral("UI Language:")},
+        {QStringLiteral("主界面字体"), QStringLiteral("Interface Font")},
+        {QStringLiteral("中文字体:"), QStringLiteral("CJK Font:")},
+        {QStringLiteral("英文字体:"), QStringLiteral("Latin Font:")},
+        {QStringLiteral("（系统默认）"), QStringLiteral("(System Default)")},
+
+        {QStringLiteral("外观与行为"), QStringLiteral("Appearance && Behavior")},
+        {QStringLiteral("外观"), QStringLiteral("Appearance")},
+        {QStringLiteral("编辑器"), QStringLiteral("Editor")},
+        {QStringLiteral("代码编辑"), QStringLiteral("Editing")},
+        {QStringLiteral("字体"), QStringLiteral("Font")},
+        {QStringLiteral("配色方案"), QStringLiteral("Theme")},
+        {QStringLiteral("新建文档"), QStringLiteral("New Document")},
+        {QStringLiteral("自动补全"), QStringLiteral("Auto-Completion")},
+        {QStringLiteral("高亮匹配"), QStringLiteral("Highlighting")},
+        {QStringLiteral("会话与备份"), QStringLiteral("Session && Backup")},
+        {QStringLiteral("<h3>外观</h3>"), QStringLiteral("<h3>Appearance</h3>")},
+        {QStringLiteral("<h3>代码编辑</h3>"), QStringLiteral("<h3>Editing</h3>")},
+        {QStringLiteral("<h3>字体</h3>"), QStringLiteral("<h3>Font</h3>")},
+        {QStringLiteral("<h3>新建文档格式</h3>"), QStringLiteral("<h3>New Document</h3>")},
+        {QStringLiteral("<h3>会话与备份</h3>"), QStringLiteral("<h3>Session && Backup</h3>")},
+
+        {QStringLiteral("工具栏"), QStringLiteral("Toolbar")},
+        {QStringLiteral("隐藏标签栏"), QStringLiteral("Hide tab bar")},
+        {QStringLiteral("行为"), QStringLiteral("Behavior")},
+        {QStringLiteral("垂直显示"), QStringLiteral("Vertical tabs")},
+        {QStringLiteral("双击关闭标签"), QStringLiteral("Double-click to close tab")},
+        {QStringLiteral("关闭最后一个标签时退出"), QStringLiteral("Exit after closing the last tab")},
+        {QStringLiteral("标签最大长度："), QStringLiteral("Max. tab label length:")},
+        {QStringLiteral("缩小标签栏"), QStringLiteral("Reduce tab height")},
+        {QStringLiteral("非当前标签变暗"), QStringLiteral("Dim inactive tabs")},
+        {QStringLiteral("为当前标签绘制颜色条"), QStringLiteral("Draw a colored bar on the active tab")},
+        {QStringLiteral("标签显示关闭按钮"), QStringLiteral("Show close button on tabs")},
+
+        {QStringLiteral("制表符与缩进"), QStringLiteral("Tabs && Indentation")},
+        {QStringLiteral("制表符宽度:"), QStringLiteral("Tab width:")},
+        {QStringLiteral("辅助显示与符号"), QStringLiteral("Display && Symbols")},
+        {QStringLiteral("显示空格与制表符符号"), QStringLiteral("Show spaces and tabs")},
+        {QStringLiteral("字体:"), QStringLiteral("Font:")},
+        {QStringLiteral("字体大小:"), QStringLiteral("Font size:")},
+
+        {QStringLiteral("换行格式:"), QStringLiteral("Line ending:")},
+        {QStringLiteral("默认编码:"), QStringLiteral("Default encoding:")},
+        {QStringLiteral("默认语言:"), QStringLiteral("Default language:")},
+        {QStringLiteral("触发字符数:"), QStringLiteral("Trigger after:")},
+        {QStringLiteral("补全类型:"), QStringLiteral("Completion type:")},
+        {QStringLiteral("忽略数字"), QStringLiteral("Ignore numbers")},
+        {QStringLiteral("选中词高亮"), QStringLiteral("Smart Highlighting")},
+
+        {QStringLiteral("会话快照与周期性备份"), QStringLiteral("Session Snapshot && Periodic Backup")},
+        {QStringLiteral("记住上次会话（下次启动恢复所有标签页）"), QStringLiteral("Remember last session (restore all tabs on startup)")},
+        {QStringLiteral("启用会话快照与周期性备份（未保存的内容也能恢复）"), QStringLiteral("Enable session snapshot and periodic backup")},
+        {QStringLiteral("备份间隔:"), QStringLiteral("Backup interval:")},
+        {QStringLiteral(" 秒"), QStringLiteral(" s")},
+
+        {QStringLiteral("深色模式"), QStringLiteral("Dark Mode")},
+        {QStringLiteral("纯文本"), QStringLiteral("Plain Text")},
+        {QStringLiteral("转为 Windows 格式"), QStringLiteral("Convert to Windows Format")},
+        {QStringLiteral("转为 Unix 格式"), QStringLiteral("Convert to Unix Format")},
+        {QStringLiteral("转为 Macintosh 格式"), QStringLiteral("Convert to Macintosh Format")},
+        {QStringLiteral("增加缩进"), QStringLiteral("Increase Indent")},
+        {QStringLiteral("减少缩进"), QStringLiteral("Decrease Indent")},
+        {QStringLiteral("快捷键映射器"), QStringLiteral("Shortcut Mapper")},
+        {QStringLiteral("粗体"), QStringLiteral("Bold")},
+        {QStringLiteral("斜体"), QStringLiteral("Italic")},
+        {QStringLiteral("总词数:"), QStringLiteral("Words:")},
+
+        {QStringLiteral("确定(&O)"), QStringLiteral("&OK")},
+        {QStringLiteral("取消(&C)"), QStringLiteral("&Cancel")},
+        {QStringLiteral("保存失败"), QStringLiteral("Save failed")},
+        {QStringLiteral("部分文件保存失败"), QStringLiteral("Some files were not saved")},
+        {QStringLiteral("未能写入 %1。\n\n原因：%2\n\n磁盘文件未被改动，文档内容仍在编辑器中；可在「编码」菜单换用其他编码后重试。"),
+         QStringLiteral("Could not write %1.\n\nReason: %2\n\nThe file on disk was not changed and the document is still open. Try another encoding from the Encoding menu.")},
+        {QStringLiteral("以下文档未保存成功（磁盘文件未被改动）：\n\n%1\n\n可在「编码」菜单换用其他编码后重试。"),
+         QStringLiteral("The following documents were not saved (disk files unchanged):\n\n%1\n\nTry another encoding from the Encoding menu.")},
+
+        {QStringLiteral("新建(&N)"), QStringLiteral("&New")},
+        {QStringLiteral("打开(&O)..."), QStringLiteral("&Open...")},
+        {QStringLiteral("打开文件夹(&D)..."), QStringLiteral("Open &Folder...")},
+        {QStringLiteral("打开文件夹"), QStringLiteral("Open Folder")},
+        {QStringLiteral("打印(&P)..."), QStringLiteral("&Print...")},
+        {QStringLiteral("退出(&X)"), QStringLiteral("E&xit")},
+        {QStringLiteral("撤销(&U)"), QStringLiteral("&Undo")},
+        {QStringLiteral("恢复"), QStringLiteral("Redo")},
+        {QStringLiteral("剪切(&T)"), QStringLiteral("Cu&t")},
+        {QStringLiteral("复制"), QStringLiteral("Copy")},
+        {QStringLiteral("粘贴(&P)"), QStringLiteral("&Paste")},
+        {QStringLiteral("全选(&A)"), QStringLiteral("Select &All")},
+        {QStringLiteral("查找(&F)..."), QStringLiteral("&Find...")},
+        {QStringLiteral("替换(&R)..."), QStringLiteral("&Replace...")},
+        {QStringLiteral("查找下一个(&N)"), QStringLiteral("Find &Next")},
+        {QStringLiteral("查找上一个(&P)"), QStringLiteral("Find &Previous")},
+        {QStringLiteral("定位/跳转行(&G)..."), QStringLiteral("&Go to Line...")},
+        {QStringLiteral("全屏模式"), QStringLiteral("Full Screen")},
+        {QStringLiteral("自动换行"), QStringLiteral("Word Wrap")},
+        {QStringLiteral("显示所有字符"), QStringLiteral("Show All Characters")},
+        {QStringLiteral("文件夹树(&T)"), QStringLiteral("Folder &Tree")},
+        {QStringLiteral("首选项(&P)..."), QStringLiteral("&Preferences...")},
+        {QStringLiteral("语言样式配置器(&S)..."), QStringLiteral("Style &Configurator...")},
+        {QStringLiteral("快捷键映射器(&K)..."), QStringLiteral("Shortcut &Mapper...")},
+        {QStringLiteral("关于 Notepad++(&A)..."), QStringLiteral("&About Notepad++...")},
+
+        {QStringLiteral("保存"), QStringLiteral("Save")},
+        {QStringLiteral("另存为"), QStringLiteral("Save As")},
+        {QStringLiteral("复制完整路径"), QStringLiteral("Copy Full Path")},
+        {QStringLiteral("复制目录路径"), QStringLiteral("Copy Folder Path")},
+        {QStringLiteral("从磁盘删除"), QStringLiteral("Delete from Disk")},
+        {QStringLiteral("从磁盘重新载入"), QStringLiteral("Reload from Disk")},
+        {QStringLiteral("只读"), QStringLiteral("Read-Only")},
+        {QStringLiteral("移到回收站"), QStringLiteral("Move to Recycle Bin")},
+        {QStringLiteral("重命名..."), QStringLiteral("Rename...")},
+        {QStringLiteral("用默认程序打开"), QStringLiteral("Open with Default App")},
+        {QStringLiteral("在文件管理器中打开"), QStringLiteral("Open Containing Folder")},
+        {QStringLiteral("在终端中打开"), QStringLiteral("Open in Terminal")},
+        {QStringLiteral("关闭"), QStringLiteral("Close")},
+        {QStringLiteral("关闭多个标签页"), QStringLiteral("Close Multiple Tabs")},
+        {QStringLiteral("关闭其他标签页"), QStringLiteral("Close Other Tabs")},
+        {QStringLiteral("关闭左侧标签页"), QStringLiteral("Close Tabs to the Left")},
+        {QStringLiteral("关闭右侧标签页"), QStringLiteral("Close Tabs to the Right")},
+        {QStringLiteral("关闭所有未修改的标签页"), QStringLiteral("Close All Unchanged Tabs")},
+        {QStringLiteral("复制到剪贴板"), QStringLiteral("Copy to Clipboard")},
+        {QStringLiteral("移动标签页"), QStringLiteral("Move Tab")},
+        {QStringLiteral("移到最前"), QStringLiteral("Move to Start")},
+        {QStringLiteral("移到最后"), QStringLiteral("Move to End")},
+
+        {QStringLiteral("文件名"), QStringLiteral("Name")},
+        {QStringLiteral("功能名称"), QStringLiteral("Command")},
+        {QStringLiteral("分类"), QStringLiteral("Category")},
+        {QStringLiteral("快捷键"), QStringLiteral("Shortcut")},
+        {QStringLiteral("当前快捷键；点击单元格可修改，留空表示禁用。"), QStringLiteral("Current shortcut; click a cell to edit, leave empty to disable.")},
+        {QStringLiteral("语言样式配置器"), QStringLiteral("Style Configurator")},
+        {QStringLiteral("摘要信息"), QStringLiteral("Document Summary")},
+        {QStringLiteral("列编辑器"), QStringLiteral("Column Editor")},
+        {QStringLiteral("快捷键冲突"), QStringLiteral("Shortcut Conflict")},
+        {QStringLiteral("文件已被外部修改"), QStringLiteral("File Changed on Disk")},
+        {QStringLiteral("当前文件为只读，无法格式化"), QStringLiteral("Current file is read-only; cannot format")},
+        {QStringLiteral("所有文件 (*.*)"), QStringLiteral("All files (*.*)")},
+        {QStringLiteral("文件夹"), QStringLiteral("Folder")},
+        {QStringLiteral("是否保存对文件 %1 的更改？"), QStringLiteral("Save changes to %1?")},
+        {QStringLiteral("是(&Y)"), QStringLiteral("&Yes")},
+        {QStringLiteral("否(&N)"), QStringLiteral("&No")},
+    };
+    return map;
+}
+
+} // namespace
+
+LocalizationManager::LocalizationManager(QObject* parent) : QObject(parent) {}
+
+LocalizationManager& LocalizationManager::instance() {
+    static LocalizationManager manager;
+    return manager;
+}
+
+void LocalizationManager::initialize(QCoreApplication* app) {
+    if (!_initialized && app) {
+        _initialized = true;
+        app->installEventFilter(this);
+    }
+    ensureLoaded();
+}
+
+void LocalizationManager::ensureLoaded() {
+    if (_dictionariesLoaded) return;
+    _dictionariesLoaded = true;
+    loadDictionaries();
+}
+
+void LocalizationManager::loadDictionaries() {
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList dirs = {
+        appDir + QStringLiteral("/nativeLang"),
+        appDir + QStringLiteral("/../share/notepad-plus-plus-linux/nativeLang"),
+        appDir + QStringLiteral("/../nativeLang"),
+        QStringLiteral("./nativeLang"),
+    };
+
+    for (const QString& dir : dirs) {
+        const QString zhPath = dir + QStringLiteral("/chineseSimplified.xml");
+        const QString enPath = dir + QStringLiteral("/english.xml");
+        if (!QFile::exists(zhPath) || !QFile::exists(enPath)) continue;
+
+        QHash<QString, QString> zh;
+        QHash<QString, QString> en;
+        if (!loadXml(zhPath, zh) || !loadXml(enPath, en)) continue;
+
+        for (auto it = zh.constBegin(); it != zh.constEnd(); ++it) {
+            const auto english = en.constFind(it.key());
+            if (english == en.constEnd()) continue;
+            if (!hasChinese(it.value()) || hasChinese(english.value())) continue;
+            _zhToEn.insert(it.value(), english.value());
+            // 某些控件会用去掉 & 助记符的同一串文案。
+            QString zhPlain = it.value();
+            QString enPlain = english.value();
+            zhPlain.remove(QLatin1Char('&'));
+            enPlain.remove(QLatin1Char('&'));
+            if (!zhPlain.isEmpty()) _zhToEn.insert(zhPlain, enPlain);
+        }
+        break;
+    }
+
+    _extra = extraDictionary();
+}
+
+QString LocalizationManager::translate(const QString& source) const {
+    if (_language != QLatin1String("en_US") || source.isEmpty()) return source;
+    const auto upstream = _zhToEn.constFind(source);
+    if (upstream != _zhToEn.constEnd()) return upstream.value();
+    const auto extra = _extra.constFind(source);
+    if (extra != _extra.constEnd()) return extra.value();
+    return source;
+}
+
+QString LocalizationManager::sourceText(QObject* object, const char* property,
+                                        const QString& current) {
+    const QByteArray key = QByteArray(kSourcePropertyPrefix) + property;
+    const QVariant stored = object->property(key.constData());
+    if (stored.isValid()) return stored.toString();
+    if (!hasChinese(current)) return QString();
+    object->setProperty(key.constData(), current);
+    return current;
+}
+
+void LocalizationManager::translateObject(QObject* object) {
+    if (!object) return;
+    // 文档/输入框内容不能当界面文案翻译。
+    if (object->inherits("QLineEdit") || object->inherits("QTextEdit")
+        || object->inherits("QPlainTextEdit") || object->inherits("ScintillaEditBase")) {
+        return;
+    }
+
+    static const QList<QByteArray> properties = {
+        "text", "title", "windowTitle", "toolTip", "statusTip",
+        "prefix", "suffix", "informativeText", "detailedText"
+    };
+    for (const QByteArray& prop : properties) {
+        const QVariant value = object->property(prop.constData());
+        if (!value.isValid() || value.userType() != QMetaType::QString) continue;
+        const QString current = value.toString();
+        const QString source = sourceText(object, prop.constData(), current);
+        if (source.isEmpty()) continue;
+        const QString translated = translate(source);
+        if (translated != current) object->setProperty(prop.constData(), translated);
+    }
+}
+
+void LocalizationManager::translateTreeItem(QTreeWidgetItem* item) {
+    if (!item) return;
+    for (int column = 0; column < item->columnCount(); ++column) {
+        const QVariant stored = item->data(column, kOriginalTextRole);
+        QString source;
+        if (stored.isValid()) {
+            source = stored.toString();
+        } else {
+            source = item->text(column);
+            if (!hasChinese(source)) continue;
+            item->setData(column, kOriginalTextRole, source);
+        }
+        const QString translated = translate(source);
+        if (translated != item->text(column)) item->setText(column, translated);
+    }
+    for (int i = 0; i < item->childCount(); ++i) translateTreeItem(item->child(i));
+}
+
+void LocalizationManager::translateComboBox(QComboBox* combo) {
+    if (!combo) return;
+    for (int i = 0; i < combo->count(); ++i) {
+        const QVariant stored = combo->itemData(i, kOriginalTextRole);
+        QString source;
+        if (stored.isValid()) {
+            source = stored.toString();
+        } else {
+            source = combo->itemText(i);
+            if (!hasChinese(source)) continue;
+            combo->setItemData(i, source, kOriginalTextRole);
+        }
+        const QString translated = translate(source);
+        if (translated != combo->itemText(i)) combo->setItemText(i, translated);
+    }
+}
+
+void LocalizationManager::applyToWidget(QWidget* root) {
+    if (!root) return;
+    ensureLoaded();
+    _knownWidgets.insert(root);
+
+    translateObject(root);
+    const QList<QObject*> children = root->findChildren<QObject*>();
+    for (QObject* child : children) translateObject(child);
+
+    for (QTreeWidget* tree : root->findChildren<QTreeWidget*>()) {
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) translateTreeItem(tree->topLevelItem(i));
+    }
+    for (QComboBox* combo : root->findChildren<QComboBox*>()) translateComboBox(combo);
+    for (QTableWidget* table : root->findChildren<QTableWidget*>()) {
+        for (int row = 0; row < table->rowCount(); ++row) {
+            for (int col = 0; col < table->columnCount(); ++col) {
+                QTableWidgetItem* item = table->item(row, col);
+                if (!item) continue;
+                QVariant stored = item->data(kOriginalTextRole);
+                QString source;
+                if (stored.isValid()) source = stored.toString();
+                else {
+                    source = item->text();
+                    if (!hasChinese(source)) continue;
+                    item->setData(kOriginalTextRole, source);
+                }
+                const QString translated = translate(source);
+                if (translated != item->text()) item->setText(translated);
+            }
+        }
+    }
+}
+
+void LocalizationManager::applyToAll() {
+    ensureLoaded();
+    const QWidgetList widgets = QApplication::allWidgets();
+    for (QWidget* widget : widgets) applyToWidget(widget);
+    // 清掉已销毁窗口的指针，避免集合无限增长。
+    for (auto it = _knownWidgets.begin(); it != _knownWidgets.end();) {
+        if (!*it) it = _knownWidgets.erase(it);
+        else ++it;
+    }
+}
+
+void LocalizationManager::setLanguage(const QString& language) {
+    ensureLoaded();
+    const QString normalized = (language == QLatin1String("en_US")) ? language
+                                                                     : QStringLiteral("zh_CN");
+    if (_language == normalized) return;
+    _language = normalized;
+    applyToAll();
+}
+
+bool LocalizationManager::eventFilter(QObject* watched, QEvent* event) {
+    if (event->type() == QEvent::Show && watched->isWidgetType()) {
+        // 中文就是源码里的原文：既不需要翻译，也不必为每个新控件做递归反射、
+        // 9 个属性的探测和动态属性写入。将来切到 en_US 时 setLanguage() 会走
+        // applyToAll() 遍历所有现存控件，中文模式下新建的窗口不会被漏翻译。
+        if (_language != QLatin1String("zh_CN"))
+            applyToWidget(qobject_cast<QWidget*>(watched));
+    } else if (event->type() == QEvent::LanguageChange) {
+        applyToAll();
+    }
+    return QObject::eventFilter(watched, event);
+}

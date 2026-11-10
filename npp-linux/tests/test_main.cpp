@@ -16,6 +16,9 @@
 #include "test_folder_tree_main_window.h"
 #include "test_tab_context.h"
 #include "test_single_instance.h"
+#include "test_preferences_dialog.h"
+#include "test_typescript.h"
+#include "test_performance.h"
 
 int main(int argc, char* argv[]) {
     // QSettings 的默认路径在 QCoreApplication 构造时确定，隔离必须在此之前。
@@ -55,6 +58,13 @@ int main(int argc, char* argv[]) {
     failures += QTest::qExec(&testTabContext, argc, argv);
     TestSingleInstance testSingleInstance;
     failures += QTest::qExec(&testSingleInstance, argc, argv);
+    TestPreferencesDialog testPreferencesDialog;
+    failures += QTest::qExec(&testPreferencesDialog, argc, argv);
+    // 放最后：它会重新加载真实配置，避免影响前面的精简 XML 夹具。
+    TestTypeScript testTypeScript;
+    failures += QTest::qExec(&testTypeScript, argc, argv);
+    TestPerformance testPerformance;
+    failures += QTest::qExec(&testPerformance, argc, argv);
 
     return failures == 0 ? 0 : 1;
 }

@@ -158,6 +158,9 @@ void TestFolderTree::themeStyleSheetsCoverDockAndTree() {
     QVERIFY2(dark.contains(QStringLiteral("QTreeView")), "深色 QSS 缺少 QTreeView 规则");
     QVERIFY2(light.contains(QStringLiteral("QDockWidget")), "浅色 QSS 缺少 QDockWidget 规则");
     QVERIFY2(light.contains(QStringLiteral("QTreeView")), "浅色 QSS 缺少 QTreeView 规则");
+    // 紧凑标签依赖属性选择器，两套主题都必须有对应规则，否则属性切换没有视觉效果。
+    QVERIFY(dark.contains(QStringLiteral("QTabBar[compact=\"true\"]")));
+    QVERIFY(light.contains(QStringLiteral("QTabBar[compact=\"true\"]")));
 }
 
 void TestFolderTree::toolbarIconResourcesExist() {

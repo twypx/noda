@@ -161,6 +161,7 @@ set(APP_SOURCES
     src/dialogs/StyleConfigDialog.cpp
     src/dialogs/StyleOverride.cpp
     src/utils/ThemeManager.cpp
+    src/utils/LocalizationManager.cpp
     src/utils/PrintHelper.cpp
     src/utils/ToolbarIcon.cpp
     src/utils/CodeFormatter.cpp
@@ -245,6 +246,19 @@ install(FILES
     "${POWEREDITOR_SRC}/langs.model.xml"
     "${POWEREDITOR_SRC}/stylers.model.xml"
     DESTINATION ${CMAKE_INSTALL_DATADIR}/${NPP_PKG_NAME})
+
+# 官方主题包（直接取自 Notepad++ 源码 PowerEditor/installer/themes）：
+# 构建目录留一份供运行/测试直接命中，安装时进 share/notepad-plus-plus-linux/themes。
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/themes"
+     DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/themes/"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${NPP_PKG_NAME}/themes)
+
+# 官方中英文界面语言资源（PowerEditor/installer/nativeLang）。
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/nativeLang"
+     DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/nativeLang/"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${NPP_PKG_NAME}/nativeLang)
 
 # 应用图标与桌面入口：图标名与 .desktop 文件名一致，GNOME 才能把任务栏悬停提示关联到本窗口
 set(NPP_ICON_NAME "notepad-plus-plus-linux")

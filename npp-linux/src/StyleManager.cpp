@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <map>
+#include <mutex>
 
 static int parseHexColor(const char* hexStr) {
     if (!hexStr || strlen(hexStr) != 6) return -1;
@@ -37,6 +39,29 @@ std::string parseFailure(const char* what, const std::string& path,
                          const pugi::xml_parse_result& res) {
     return std::string(what) + " 读取/解析失败（" + path + "）：" + res.description()
          + "，偏移 " + std::to_string(res.offset);
+}
+
+// stylers.model.xml 与官方主题 XML 的 LexerStyles 结构完全一致，共用一份解析。
+void parseLexerStyles(const pugi::xml_node& lexerRoot,
+                      std::unordered_map<std::string, std::vector<LexerStyle>>& out) {
+    for (pugi::xml_node lexerNode : lexerRoot.children("LexerType")) {
+        const std::string langName = lexerNode.attribute("name").as_string();
+        std::vector<LexerStyle> styles;
+        for (pugi::xml_node styleNode : lexerNode.children("WordsStyle")) {
+            LexerStyle s;
+            s.styleID = styleNode.attribute("styleID").as_int();
+            s.name = styleNode.attribute("name").as_string();
+            s.fgColor = parseHexColor(styleNode.attribute("fgColor").as_string());
+            s.bgColor = parseHexColor(styleNode.attribute("bgColor").as_string());
+            s.fontName = styleNode.attribute("fontName").as_string();
+            s.fontSize = styleNode.attribute("fontSize").as_int(0);
+            const int fontStyle = styleNode.attribute("fontStyle").as_int(0);
+            s.bold = (fontStyle & 1) != 0;
+            s.italic = (fontStyle & 2) != 0;
+            styles.push_back(std::move(s));
+        }
+        if (!langName.empty()) out[langName] = std::move(styles);
+    }
 }
 
 } // namespace
@@ -194,26 +219,13 @@ ConfigLoadReport StyleManager::loadConfigs(const std::string& langsPath,
             }
         }
 
-        if (lexerRoot) {
-            for (pugi::xml_node lexerNode : lexerRoot.children("LexerType")) {
-                const std::string langName = lexerNode.attribute("name").as_string();
-                std::vector<LexerStyle> styles;
-                for (pugi::xml_node styleNode : lexerNode.children("WordsStyle")) {
-                    LexerStyle s;
-                    s.styleID = styleNode.attribute("styleID").as_int();
-                    s.name = styleNode.attribute("name").as_string();
-                    s.fgColor = parseHexColor(styleNode.attribute("fgColor").as_string());
-                    s.bgColor = parseHexColor(styleNode.attribute("bgColor").as_string());
-                    const int fontStyle = styleNode.attribute("fontStyle").as_int(0);
-                    s.bold = (fontStyle & 1) != 0;
-                    s.italic = (fontStyle & 2) != 0;
-                    styles.push_back(s);
-                }
-                if (!langName.empty()) _styles[langName] = std::move(styles);
-            }
-        }
+        if (lexerRoot) parseLexerStyles(lexerRoot, _styles);
         if (_styles.empty())
             report.errors.push_back("stylers.model.xml 未定义任何 LexerType 样式");
+        // 保存内置样式作为主题兜底；重新载入配置时主题回到 Default。
+        _baseStyles = _styles;
+        _themePath.clear();
+        _themedLanguages.clear();
     }
 
     report.languageCount = _languages.size();
@@ -232,6 +244,119 @@ ConfigLoadReport StyleManager::loadConfigs(const std::string& langsPath,
     return report;
 }
 
+std::string StyleManager::resolveLanguageId(const std::string& nameOrId) const {
+    if (nameOrId.empty() || nameOrId == "normal" || nameOrId == "Normal Text")
+        return "normal";
+    if (_languages.count(nameOrId)) return nameOrId;
+
+    static const std::unordered_map<std::string, std::string> alias = {
+        {"C++", "cpp"}, {"C#", "cs"}, {"JavaScript", "javascript"},
+        {"TypeScript", "typescript"}, {"Shell", "bash"}, {"HTML", "html"},
+        {"XML", "xml"}, {"SQL", "sql"}, {"Python", "python"}, {"Java", "java"},
+        {"Go", "go"}, {"Rust", "rust"}, {"JSON", "json"}, {"CSS", "css"},
+        {"PHP", "php"}, {"YAML", "yaml"}, {"Markdown", "markdown"},
+    };
+    const auto it = alias.find(nameOrId);
+    if (it != alias.end() && _languages.count(it->second)) return it->second;
+    return "normal";
+}
+
+namespace {
+// 主题 XML 是安装期静态资源，运行期不会增删。按搜索根缓存扫描结果，
+// 避免每次打开首选项 / 切换主题都做 5 次 directory_iterator 磁盘遍历。
+std::mutex g_themeCacheMutex;
+std::map<std::string, std::vector<ThemeInfo>> g_themeCache;
+} // namespace
+
+void StyleManager::invalidateThemeCache() {
+    std::lock_guard<std::mutex> lock(g_themeCacheMutex);
+    g_themeCache.clear();
+}
+
+std::vector<ThemeInfo> StyleManager::locateThemes(const std::string& appDir) {
+    {
+        std::lock_guard<std::mutex> lock(g_themeCacheMutex);
+        const auto hit = g_themeCache.find(appDir);
+        if (hit != g_themeCache.end()) return hit->second;
+    }
+
+    const std::vector<std::string> dirs = {
+        appDir + "/themes",
+        appDir + "/../share/notepad-plus-plus-linux/themes",
+        // 构建目录在 npp-linux/build，源码树主题在 npp-linux/themes。
+        appDir + "/../themes",
+        appDir + "/../../npp-linux/themes",
+        "./themes",
+    };
+
+    std::map<std::string, std::string> byName; // 同名主题以先命中的目录为准
+    for (const auto& rawDir : dirs) {
+        const std::filesystem::path dir =
+            std::filesystem::path(rawDir).lexically_normal();
+        std::error_code ec;
+        if (!std::filesystem::is_directory(dir, ec) || ec) continue;
+
+        for (std::filesystem::directory_iterator it(dir, ec), end;
+             !ec && it != end; it.increment(ec)) {
+            if (!it->is_regular_file(ec) || ec) continue;
+            if (it->path().extension() != ".xml") continue;
+            const std::string name = it->path().stem().string();
+            if (!name.empty()) byName.emplace(name, it->path().string());
+        }
+    }
+
+    std::vector<ThemeInfo> themes;
+    themes.reserve(byName.size());
+    for (auto& entry : byName) themes.push_back({entry.first, entry.second});
+    {
+        std::lock_guard<std::mutex> lock(g_themeCacheMutex);
+        g_themeCache.emplace(appDir, themes);
+    }
+    return themes;
+}
+
+bool StyleManager::applyThemeFile(const std::string& path, std::string* error) {
+    pugi::xml_document doc;
+    const pugi::xml_parse_result res = doc.load_file(path.c_str());
+    if (!res) {
+        if (error) *error = parseFailure("主题", path, res);
+        return false;
+    }
+
+    const pugi::xml_node lexerRoot = doc.child("NotepadPlus").child("LexerStyles");
+    if (!lexerRoot) {
+        if (error) *error = "主题文件缺少 NotepadPlus/LexerStyles 节点：" + path;
+        return false;
+    }
+
+    std::unordered_map<std::string, std::vector<LexerStyle>> themed;
+    parseLexerStyles(lexerRoot, themed);
+    if (themed.empty()) {
+        if (error) *error = "主题文件未定义任何 LexerType 样式：" + path;
+        return false;
+    }
+
+    // 主题只覆盖它声明的语言，其余回退到内置 stylers，避免切换主题后一半语言没高亮。
+    _styles = _baseStyles;
+    _themedLanguages.clear();
+    for (auto& entry : themed) {
+        _themedLanguages.insert(entry.first);
+        _styles[entry.first] = std::move(entry.second);
+    }
+    _themePath = path;
+    return true;
+}
+
+void StyleManager::resetTheme() {
+    _styles = _baseStyles;
+    _themePath.clear();
+    _themedLanguages.clear();
+}
+
+bool StyleManager::hasThemeStyle(const std::string& langName) const {
+    return _themedLanguages.count(langName) != 0;
+}
+
 std::string StyleManager::detectLanguageByExt(const std::string& ext) const {
     std::string lowerExt = ext;
     std::transform(lowerExt.begin(), lowerExt.end(), lowerExt.begin(), ::tolower);
@@ -245,7 +370,9 @@ std::string StyleManager::detectLanguageByExt(const std::string& ext) const {
     if (lowerExt == "xml") return "xml";
     if (lowerExt == "cpp" || lowerExt == "cxx" || lowerExt == "cc" || lowerExt == "c" || lowerExt == "h" || lowerExt == "hpp") return "cpp";
     if (lowerExt == "java") return "java";
-    if (lowerExt == "js" || lowerExt == "jsx" || lowerExt == "ts" || lowerExt == "tsx") return "javascript";
+    if (lowerExt == "js" || lowerExt == "jsx") return "javascript";
+    // .ts / .tsx 属于 TypeScript（langs.model.xml 的 typescript ext），不能再兜底成 JavaScript。
+    if (lowerExt == "ts" || lowerExt == "tsx") return "typescript";
     if (lowerExt == "json") return "json";
     if (lowerExt == "py") return "python";
     if (lowerExt == "sh" || lowerExt == "bash") return "bash";
@@ -268,6 +395,9 @@ std::string StyleManager::getLexerName(const std::string& langName) const {
         {"java", "cpp"},
         {"javascript", "cpp"},
         {"javascript.js", "cpp"},
+        // 上游 ScintillaEditView.cpp:191 把 TypeScript 登记为 cpp 词法器；
+        // Lexilla 没有名为 typescript 的模块，原样传入 CreateLexer 会静默得到 nullptr。
+        {"typescript", "cpp"},
         {"rc", "cpp"},
         {"actionscript", "cpp"},
         {"python", "python"},

@@ -3,6 +3,7 @@
 #include "StyleManager.h"
 #include "utils/StartupNotify.h"
 #include "utils/SingleInstance.h"
+#include "utils/LocalizationManager.h"
 #include <QDir>
 #include <QIcon>
 #include <QMessageBox>
@@ -41,6 +42,9 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("Notepad++");
     app.setOrganizationName("Notepad++");
+
+    // 上游 nativeLang（中文/英文）资源 + 全局控件翻译过滤器。
+    LocalizationManager::instance().initialize(&app);
 
     // 应用图标：由 notepad++_cutout.png 经 tools/gen_icons.py 生成透明背景多尺寸 PNG
     // 并内嵌到可执行文件（qrc），

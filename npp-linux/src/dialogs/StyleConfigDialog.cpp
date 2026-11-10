@@ -31,7 +31,7 @@ StyleConfigDialog::StyleConfigDialog(QWidget* parent)
     , _fgColor(Qt::black)
     , _bgColor(Qt::white)
 {
-    setWindowTitle("语言样式配置器 (Style Configurator)");
+    setWindowTitle("语言样式配置器");
     resize(590, 440);
     setupUI();
 }
@@ -63,8 +63,8 @@ void StyleConfigDialog::setupUI() {
     _fontSizeSpin->setValue(10);
     fontLayout->addRow("字体系列:", _fontCombo);
     fontLayout->addRow("字体大小:", _fontSizeSpin);
-    _boldCheck = new QCheckBox("粗体 (Bold)", this);
-    _italicCheck = new QCheckBox("斜体 (Italic)", this);
+    _boldCheck = new QCheckBox("粗体", this);
+    _italicCheck = new QCheckBox("斜体", this);
     fontLayout->addRow("", _boldCheck);
     fontLayout->addRow("", _italicCheck);
     rightLayout->addWidget(fontGroup);

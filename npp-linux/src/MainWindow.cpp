@@ -38,6 +38,7 @@
 #include <QtConcurrent/QtConcurrentRun>
 #include <vector>
 #include "utils/CodeFormatter.h"
+#include "utils/LocalizationManager.h"
 #include "dialogs/StyleOverride.h"
 #include "dialogs/ShortcutManager.h"
 #include "dialogs/AboutDlg.h"
@@ -65,6 +66,12 @@ LineEnding eolFromPref(const QString& s) {
     if (s.contains("CRLF") || s.contains("Windows")) return LineEnding::CRLF;
     if (s.contains("Macintosh") || s.contains("Mac") || s.compare("CR", Qt::CaseInsensitive) == 0) return LineEnding::CR;
     return LineEnding::LF;
+}
+
+// 新建文档的默认语言：兼容旧配置里的显示名（C++ / Shell），统一折算成 langs.model.xml 的 id。
+QString defaultLanguageId(const QString& stored) {
+    return QString::fromStdString(
+        StyleManager::instance().resolveLanguageId(stored.toStdString()));
 }
 
 bool hasLocalUrl(const QMimeData* mime) {
@@ -133,6 +140,8 @@ MainWindow::MainWindow(QWidget* parent)
     setWindowTitle("Notepad++ (Linux)");
     resize(1080, 780);
 
+    // 记住系统默认字体：首选项选“系统默认”时要能恢复，而不是把当前字体当成默认。
+    _defaultUiFont = QApplication::font();
     loadPreferences();
 
     setupMenus();
@@ -143,6 +152,10 @@ MainWindow::MainWindow(QWidget* parent)
     loadRecentFiles();
 
     connect(_tabManager, &TabManager::activeEditorChanged, this, &MainWindow::onActiveEditorChanged);
+    // 上游 quitOnEmpty：延迟到事件循环再 close()，避免在 closeTab 的析构路径里销毁窗口。
+    connect(_tabManager, &TabManager::quitOnEmptyRequested, this, [this]() {
+        QTimer::singleShot(0, this, &QWidget::close);
+    });
     // 标签文本变化（保存/另存/重命名/修改标记）时，同步窗口标题——任务栏悬停提示读的就是它。
     connect(_tabManager, &TabManager::tabTitleChanged, this, [this](int) {
         syncWindowTitle();
@@ -178,9 +191,11 @@ MainWindow::MainWindow(QWidget* parent)
         auto* firstEd = _tabManager->createNewTab();
         if (firstEd) {
             firstEd->applyDefaultDocFormat(eolFromPref(_prefs.defaultEOL), _prefs.defaultEncoding.toStdString());
+            firstEd->applyLanguage(defaultLanguageId(_prefs.defaultLanguage).toStdString());
         }
     }
-    applyPreferences(_prefs);
+    // 启动时 _prefs 已载入，旧值比较无法判断“尚未应用”，必须强制走一遍。
+    applyPreferences(_prefs, true);
     reloadStyleOverrides();
 
     ThemeManager::applyTheme(_prefs.darkMode);
@@ -309,8 +324,8 @@ void MainWindow::setupEditMenu() {
     copyMenu->addAction("复制所有文件路径", this, &MainWindow::onCopyAllFilePaths);
 
     auto* indentMenu = menu->addMenu("缩进(&I)");
-    indentMenu->addAction("增加缩进 (Tab)", this, &MainWindow::onIndent);
-    indentMenu->addAction("减少缩进 (Shift+Tab)", this, &MainWindow::onUnindent);
+    indentMenu->addAction("增加缩进", this, &MainWindow::onIndent);
+    indentMenu->addAction("减少缩进", this, &MainWindow::onUnindent);
 
     auto* caseMenu = menu->addMenu("转换大小写(&V)");
     auto* upperAct = caseMenu->addAction("转成大写(&U)", this, &MainWindow::onToUpperCase);
@@ -506,7 +521,7 @@ void MainWindow::setupViewMenu() {
     menu->addSeparator();
     menu->addAction("摘要信息 / 统计信息...", this, &MainWindow::onShowDocSummary);
 
-    _actDarkMode = menu->addAction("深色模式 (Dark Mode)", this, &MainWindow::onToggleDarkMode);
+    _actDarkMode = menu->addAction("深色模式", this, &MainWindow::onToggleDarkMode);
     _actDarkMode->setCheckable(true);
 }
 
@@ -555,9 +570,9 @@ void MainWindow::setupEncodingMenu() {
 
     menu->addSeparator();
     auto* eolMenu = menu->addMenu("文档格式转换 (换行符)");
-    eolMenu->addAction("转为 Windows 格式 (CR LF)", [this]() { onConvertLineEnding(LineEnding::CRLF); });
-    eolMenu->addAction("转为 Unix 格式 (LF)", [this]() { onConvertLineEnding(LineEnding::LF); });
-    eolMenu->addAction("转为 Macintosh 格式 (CR)", [this]() { onConvertLineEnding(LineEnding::CR); });
+    eolMenu->addAction("转为 Windows 格式", [this]() { onConvertLineEnding(LineEnding::CRLF); });
+    eolMenu->addAction("转为 Unix 格式", [this]() { onConvertLineEnding(LineEnding::LF); });
+    eolMenu->addAction("转为 Macintosh 格式", [this]() { onConvertLineEnding(LineEnding::CR); });
 }
 
 void MainWindow::setupLanguageMenu() {
@@ -565,7 +580,7 @@ void MainWindow::setupLanguageMenu() {
     _langActionGroup = new QActionGroup(this);
     _langActionGroup->setExclusive(true);
 
-    auto* normalAct = langMenu->addAction("纯文本 (Normal Text)");
+    auto* normalAct = langMenu->addAction("纯文本");
     normalAct->setCheckable(true);
     normalAct->setChecked(true);
     normalAct->setData("normal");
@@ -736,12 +751,15 @@ void MainWindow::onNewFile() {
     auto* ed = _tabManager->createNewTab();
     if (ed) {
         ed->applyDefaultDocFormat(eolFromPref(_prefs.defaultEOL), _prefs.defaultEncoding.toStdString());
+        ed->applyLanguage(defaultLanguageId(_prefs.defaultLanguage).toStdString());
         updateStatusBar(ed);
     }
 }
 
 void MainWindow::onOpenFile() {
-    QString path = QFileDialog::getOpenFileName(this, "打开文件", QString(), "所有文件 (*.*)");
+    QString path = QFileDialog::getOpenFileName(
+        this, "打开文件", QString(), "所有文件 (*.*)", nullptr,
+        QFileDialog::DontUseNativeDialog);
     if (!path.isEmpty()) {
         openFile(path);
     }
@@ -835,9 +853,14 @@ void MainWindow::setupFolderTree() {
 }
 
 void MainWindow::onOpenFolder() {
+    // 强制使用 Qt 内建目录选择对话框，而非原生对话框。
+    // 在部分 Linux 桌面（KDE 平台的 KDirSelectDialog、GNOME/Wayland 缺少
+    // xdg-desktop-portal 时）原生 getExistingDirectory 会静默返回空、窗口根本不弹出，
+    // 表现为「点打开文件夹没反应」。Qt 内建对话框随 QtWidgets 一起链接，必然可用。
     const QString dir = QFileDialog::getExistingDirectory(
         this, QStringLiteral("打开文件夹"), QDir::homePath(),
-        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
+            | QFileDialog::DontUseNativeDialog);
     if (!dir.isEmpty()) openFolderPath(dir);
 }
 
@@ -929,7 +952,9 @@ void MainWindow::onSaveFile() {
 void MainWindow::onSaveAsFile() {
     auto* ed = _tabManager->currentEditor();
     if (!ed) return;
-    const QString path = QFileDialog::getSaveFileName(this, "另存为", QString(), "所有文件 (*.*)");
+    const QString path = QFileDialog::getSaveFileName(
+        this, "另存为", QString(), "所有文件 (*.*)", nullptr,
+        QFileDialog::DontUseNativeDialog);
     if (path.isEmpty()) return;
 
     const QString oldPath = QString::fromStdString(ed->buffer()->getFilePath());
@@ -956,7 +981,9 @@ void MainWindow::onSaveAsFile() {
 void MainWindow::onSaveCopyAs() {
     auto* ed = _tabManager->currentEditor();
     if (!ed) return;
-    const QString path = QFileDialog::getSaveFileName(this, "拷贝另存为", QString(), "所有文件 (*.*)");
+    const QString path = QFileDialog::getSaveFileName(
+        this, "拷贝另存为", QString(), "所有文件 (*.*)", nullptr,
+        QFileDialog::DontUseNativeDialog);
     if (path.isEmpty()) return;
 
     // 旧实现直接倾倒内存 UTF-8 字节，非 UTF-8 文档会得到编码错误的副本，
@@ -1751,6 +1778,8 @@ void MainWindow::onPreferences() {
     PreferencesDialog dlg(_prefs, this);
     if (dlg.exec() == QDialog::Accepted) {
         applyPreferences(dlg.getPreferences());
+        // 持久化只发生在用户确认之后；applyPreferences 本身保持纯应用，启动不再重复写盘。
+        savePreferences();
     }
 }
 
@@ -1809,46 +1838,169 @@ void MainWindow::onShortcutsMapper() {
     dlg.exec();
 }
 
-void MainWindow::applyPreferences(const AppPreferences& prefs) {
-    _prefs = prefs;
-    savePreferences();
+void MainWindow::applyUiFonts(const AppPreferences& prefs) {
+    QStringList families;
+    // 英文字体在前、中文在后形成字体回退链：拉丁字符用 en，CJK 落到 zh。
+    if (!prefs.uiFontEn.isEmpty()) families << prefs.uiFontEn;
+    if (!prefs.uiFontZh.isEmpty()) families << prefs.uiFontZh;
 
-    if (_prefs.darkMode != _isDarkMode) {
-        onToggleDarkMode(_prefs.darkMode);
-        if (_actDarkMode) _actDarkMode->setChecked(_prefs.darkMode);
+    QFont target = families.isEmpty() ? _defaultUiFont : QApplication::font();
+    if (!families.isEmpty()) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        target.setFamilies(families);
+#else
+        target.setFamily(families.first());
+#endif
     }
 
-    if (_actWrap) _actWrap->setChecked(_prefs.wordWrap);
-    if (_actShowWs) _actShowWs->setChecked(_prefs.showWhitespace);
-    if (_actShowEol) _actShowEol->setChecked(_prefs.showEOL);
-    if (_actShowGuides) _actShowGuides->setChecked(_prefs.showIndentGuides);
+    // 只改 QApplication::setFont() 不够：主题 QSS 里的 QWidget font-family 会覆盖它。
+    // 两者一起更新，并在后续切换深/浅主题时由 ThemeManager 自动保留。
+    ThemeManager::setUiFont(target, families);
+}
+
+void MainWindow::applyThemePreference(const QString& themeName) {
+    QString name = themeName;
+    if (name.endsWith(QStringLiteral(".xml"), Qt::CaseInsensitive)) name.chop(4);
+
+    if (name.isEmpty() || name.compare(QStringLiteral("Default"), Qt::CaseInsensitive) == 0) {
+        StyleManager::instance().resetTheme();
+        return;
+    }
+
+    const auto themes = StyleManager::locateThemes(
+        QApplication::applicationDirPath().toStdString());
+    for (const ThemeInfo& theme : themes) {
+        if (QString::fromStdString(theme.name).compare(name, Qt::CaseInsensitive) != 0)
+            continue;
+        std::string error;
+        if (!StyleManager::instance().applyThemeFile(theme.path, &error)) {
+            StyleManager::instance().resetTheme();
+            statusBar()->showMessage(QString::fromStdString(error), 6000);
+        }
+        return;
+    }
+
+    StyleManager::instance().resetTheme();
+    statusBar()->showMessage(
+        QStringLiteral("找不到主题「%1」，已回退到内置样式").arg(themeName), 6000);
+}
+
+void MainWindow::applyPreferences(const AppPreferences& prefs, bool force) {
+    const AppPreferences old = _prefs;
+    _prefs = prefs;
+
+    // ---- 纯 UI / 标签栏：值没变就不重排、不重新 polish ----
+    if (_toolBar && (force || old.hideToolBar != prefs.hideToolBar)) {
+        _toolBar->setVisible(!prefs.hideToolBar);
+    }
+    if (_tabManager) {
+        // 下面多个样式 setter 会改 QTabBar 的动态属性，合并成一次 polish。
+        _tabManager->beginStyleBatch();
+        if (force || old.tabHide != prefs.tabHide)
+            _tabManager->setTabBarHidden(prefs.tabHide);
+        if (force || old.tabVertical != prefs.tabVertical)
+            _tabManager->setVerticalTabs(prefs.tabVertical);
+        if (force || old.tabShowCloseButton != prefs.tabShowCloseButton)
+            _tabManager->setTabsClosable(prefs.tabShowCloseButton);
+        if (force || old.tabLock != prefs.tabLock)
+            _tabManager->setMovable(!prefs.tabLock);
+        if (force || old.tabReduce != prefs.tabReduce)
+            _tabManager->setTabReduce(prefs.tabReduce);
+        if (force || old.tabActiveTopBar != prefs.tabActiveTopBar)
+            _tabManager->setActiveTopBar(prefs.tabActiveTopBar);
+        if (force || old.tabInactiveColor != prefs.tabInactiveColor)
+            _tabManager->setInactiveColored(prefs.tabInactiveColor);
+        if (force || old.tabCompactLabelLen != prefs.tabCompactLabelLen)
+            _tabManager->setCompactLabelLength(prefs.tabCompactLabelLen);
+        if (force || old.tabDoubleClickClose != prefs.tabDoubleClickClose)
+            _tabManager->setDoubleClickClose(prefs.tabDoubleClickClose);
+        if (force || old.tabQuitOnEmpty != prefs.tabQuitOnEmpty)
+            _tabManager->setQuitOnEmpty(prefs.tabQuitOnEmpty);
+        _tabManager->endStyleBatch();
+    }
+
+    if (force || old.uiFontZh != prefs.uiFontZh || old.uiFontEn != prefs.uiFontEn)
+        applyUiFonts(prefs);
+
+    // 界面语言运行时切换，不需要重启。
+    if (force || old.uiLanguage != prefs.uiLanguage)
+        LocalizationManager::instance().setLanguage(prefs.uiLanguage);
+
+    // _isDarkMode 本身就是“当前已应用状态”，启动时不需要 force。
+    const bool darkChanged = old.darkMode != prefs.darkMode || prefs.darkMode != _isDarkMode;
+    if (darkChanged) {
+        onToggleDarkMode(prefs.darkMode);
+        if (_actDarkMode) _actDarkMode->setChecked(prefs.darkMode);
+    }
+
+    if (_actWrap && (force || old.wordWrap != prefs.wordWrap))
+        _actWrap->setChecked(prefs.wordWrap);
+    if (_actShowWs && (force || old.showWhitespace != prefs.showWhitespace))
+        _actShowWs->setChecked(prefs.showWhitespace);
+    if (_actShowEol && (force || old.showEOL != prefs.showEOL))
+        _actShowEol->setChecked(prefs.showEOL);
+    if (_actShowGuides && (force || old.showIndentGuides != prefs.showIndentGuides))
+        _actShowGuides->setChecked(prefs.showIndentGuides);
     // 合体项的勾选由 syncShowAll 在分量开关的 toggled 里推导，但两个分量都没变化时
     // toggled 不会发射，所以这里显式算一次，避免从配置文件恢复时漏掉。
-    if (_actShowAll) _actShowAll->setChecked(_prefs.showWhitespace && _prefs.showEOL);
-
-    for (int i = 0; i < _tabManager->count(); ++i) {
-        auto* ed = _tabManager->editorAt(i);
-        if (!ed) continue;
-        applyPreferencesToEditor(ed);
+    if (_actShowAll && (force || old.showWhitespace != prefs.showWhitespace
+                        || old.showEOL != prefs.showEOL)) {
+        _actShowAll->setChecked(prefs.showWhitespace && prefs.showEOL);
     }
 
-    restartBackupTimer();
-    // 关掉会话快照后，内存里的备份文件已经没人引用了（restoreSession 也不再读它），
-    // 顺手清掉，否则它们会在 backup/ 里永远留着。
-    if (!_prefs.rememberSession || !_prefs.snapshotBackup) {
+    const bool themeChanged = force || old.themeName != prefs.themeName;
+    if (themeChanged) applyThemePreference(prefs.themeName);
+
+    const bool editorChanged = force
+        || old.tabWidth != prefs.tabWidth || old.tabToSpaces != prefs.tabToSpaces
+        || old.wordWrap != prefs.wordWrap || old.showLineNumbers != prefs.showLineNumbers
+        || old.showFoldMargin != prefs.showFoldMargin
+        || old.showIndentGuides != prefs.showIndentGuides
+        || old.showWhitespace != prefs.showWhitespace || old.showEOL != prefs.showEOL
+        || old.fontName != prefs.fontName || old.fontSize != prefs.fontSize
+        || old.fontSmooth != prefs.fontSmooth || old.darkMode != prefs.darkMode
+        || old.highlightMatchingWords != prefs.highlightMatchingWords
+        || old.highlightMatchingBraces != prefs.highlightMatchingBraces
+        || old.highlightMatchCase != prefs.highlightMatchCase
+        || old.highlightMatchWholeWord != prefs.highlightMatchWholeWord
+        || old.autoCompletion != prefs.autoCompletion
+        || old.autoCompletionMinChars != prefs.autoCompletionMinChars
+        || old.autoCompletionType != prefs.autoCompletionType
+        || old.autoCompletionIgnoreNumbers != prefs.autoCompletionIgnoreNumbers;
+    if (editorChanged) {
         for (int i = 0; i < _tabManager->count(); ++i) {
-            dropBackup(_tabManager->editorAt(i));
+            if (auto* ed = _tabManager->editorAt(i)) applyPreferencesToEditor(ed);
         }
     }
 
-    // applyPreferencesToEditor() 用首选项字体重置了所有样式槽位，必须再把用户在
-    // 样式配置器里设的槽位字体/字号盖回去，否则改一次首选项就把覆盖冲掉了。
-    reloadStyleOverrides();
+    // 主题/深色/字体会改样式槽位，需要重新套用语言样式与用户覆盖。
+    if (force || themeChanged || darkChanged
+        || old.fontName != prefs.fontName || old.fontSize != prefs.fontSize) {
+        reloadStyleOverrides();
+    }
+
+    const bool sessionChanged = force
+        || old.rememberSession != prefs.rememberSession
+        || old.snapshotBackup != prefs.snapshotBackup
+        || old.backupIntervalSec != prefs.backupIntervalSec;
+    if (sessionChanged) {
+        restartBackupTimer();
+        // 关掉会话快照后，内存里的备份文件已经没人引用了，顺手清掉。
+        if (!prefs.rememberSession || !prefs.snapshotBackup) {
+            for (int i = 0; i < _tabManager->count(); ++i)
+                dropBackup(_tabManager->editorAt(i));
+        }
+    }
 }
 
 void MainWindow::applyPreferencesToEditor(EditorView* ed) {
     if (!ed) return;
-    ed->setEditorFont(_prefs.fontName, _prefs.fontSize);
+    if (ed->getEditorFontName() != _prefs.fontName
+        || ed->getEditorFontSize() != _prefs.fontSize) {
+        ed->setEditorFont(_prefs.fontName, _prefs.fontSize);
+    }
+    ed->send(SCI_SETFONTQUALITY, _prefs.fontSmooth
+        ? SC_EFF_QUALITY_LCD_OPTIMIZED : SC_EFF_QUALITY_NON_ANTIALIASED);
     ed->send(SCI_SETTABWIDTH, _prefs.tabWidth);
     ed->send(SCI_SETUSETABS, _prefs.tabToSpaces ? 0 : 1);
     ed->setWrapMode(_prefs.wordWrap);
@@ -1859,23 +2011,60 @@ void MainWindow::applyPreferencesToEditor(EditorView* ed) {
     ed->setShowWhitespace(_prefs.showWhitespace);
     ed->setShowEOL(_prefs.showEOL);
     ed->setDarkMode(_prefs.darkMode);
+    ed->setHighlightPrefs(_prefs.highlightMatchingWords, _prefs.highlightMatchingBraces,
+                          _prefs.highlightMatchCase, _prefs.highlightMatchWholeWord);
+    ed->setAutoCompletion(_prefs.autoCompletion, _prefs.autoCompletionMinChars,
+                          _prefs.autoCompletionType, _prefs.autoCompletionIgnoreNumbers);
 }
 
 void MainWindow::loadPreferences() {
     QSettings s;
-    _prefs.fontName = s.value("prefs/fontName", "Monospace").toString();
-    _prefs.fontSize = s.value("prefs/fontSize", 10).toInt();
+    _prefs.uiLanguage = s.value("prefs/uiLanguage", "zh_CN").toString();
+    _prefs.darkMode = s.value("prefs/darkMode", false).toBool();
+    _prefs.uiFontZh = s.value("prefs/uiFontZh", "").toString();
+    _prefs.uiFontEn = s.value("prefs/uiFontEn", "").toString();
+
+    _prefs.hideToolBar = s.value("prefs/hideToolBar", false).toBool();
+    _prefs.tabHide = s.value("prefs/tabHide", false).toBool();
+    _prefs.tabVertical = s.value("prefs/tabVertical", false).toBool();
+    _prefs.tabLock = s.value("prefs/tabLock", false).toBool();
+    _prefs.tabDoubleClickClose = s.value("prefs/tabDoubleClickClose", false).toBool();
+    _prefs.tabQuitOnEmpty = s.value("prefs/tabQuitOnEmpty", false).toBool();
+    _prefs.tabCompactLabelLen = qBound(0, s.value("prefs/tabCompactLabelLen", 0).toInt(), 257);
+    _prefs.tabReduce = s.value("prefs/tabReduce", false).toBool();
+    _prefs.tabInactiveColor = s.value("prefs/tabInactiveColor", false).toBool();
+    _prefs.tabActiveTopBar = s.value("prefs/tabActiveTopBar", true).toBool();
+    _prefs.tabShowCloseButton = s.value("prefs/tabShowCloseButton", true).toBool();
+
     _prefs.tabWidth = s.value("prefs/tabWidth", 4).toInt();
     _prefs.tabToSpaces = s.value("prefs/tabToSpaces", false).toBool();
     _prefs.wordWrap = s.value("prefs/wordWrap", false).toBool();
-    _prefs.darkMode = s.value("prefs/darkMode", false).toBool();
     _prefs.showLineNumbers = s.value("prefs/showLineNumbers", true).toBool();
     _prefs.showFoldMargin = s.value("prefs/showFoldMargin", true).toBool();
     _prefs.showIndentGuides = s.value("prefs/showIndentGuides", false).toBool();
     _prefs.showWhitespace = s.value("prefs/showWhitespace", false).toBool();
     _prefs.showEOL = s.value("prefs/showEOL", false).toBool();
+
+    _prefs.fontName = s.value("prefs/fontName", "Monospace").toString();
+    _prefs.fontSize = s.value("prefs/fontSize", 10).toInt();
+    _prefs.fontSmooth = s.value("prefs/fontSmooth", true).toBool();
+
+    _prefs.themeName = s.value("prefs/themeName", "Default").toString();
+
     _prefs.defaultEOL = s.value("prefs/defaultEOL", "Unix (LF)").toString();
     _prefs.defaultEncoding = s.value("prefs/defaultEncoding", "UTF-8").toString();
+    _prefs.defaultLanguage = s.value("prefs/defaultLanguage", "Normal Text").toString();
+
+    _prefs.autoCompletion = s.value("prefs/autoCompletion", true).toBool();
+    _prefs.autoCompletionMinChars = s.value("prefs/autoCompletionMinChars", 2).toInt();
+    _prefs.autoCompletionType = qBound(0, s.value("prefs/autoCompletionType", 0).toInt(), 1);
+    _prefs.autoCompletionIgnoreNumbers = s.value("prefs/autoCompletionIgnoreNumbers", true).toBool();
+
+    _prefs.highlightMatchingWords = s.value("prefs/highlightMatchingWords", true).toBool();
+    _prefs.highlightMatchingBraces = s.value("prefs/highlightMatchingBraces", true).toBool();
+    _prefs.highlightMatchCase = s.value("prefs/highlightMatchCase", true).toBool();
+    _prefs.highlightMatchWholeWord = s.value("prefs/highlightMatchWholeWord", false).toBool();
+
     _prefs.rememberSession = s.value("prefs/rememberSession", true).toBool();
     _prefs.snapshotBackup = s.value("prefs/snapshotBackup", true).toBool();
     _prefs.backupIntervalSec = s.value("prefs/backupIntervalSec", 7).toInt();
@@ -1883,19 +2072,52 @@ void MainWindow::loadPreferences() {
 
 void MainWindow::savePreferences() {
     QSettings s;
-    s.setValue("prefs/fontName", _prefs.fontName);
-    s.setValue("prefs/fontSize", _prefs.fontSize);
+    s.setValue("prefs/uiLanguage", _prefs.uiLanguage);
+    s.setValue("prefs/darkMode", _prefs.darkMode);
+    s.setValue("prefs/uiFontZh", _prefs.uiFontZh);
+    s.setValue("prefs/uiFontEn", _prefs.uiFontEn);
+
+    s.setValue("prefs/hideToolBar", _prefs.hideToolBar);
+    s.setValue("prefs/tabHide", _prefs.tabHide);
+    s.setValue("prefs/tabVertical", _prefs.tabVertical);
+    s.setValue("prefs/tabLock", _prefs.tabLock);
+    s.setValue("prefs/tabDoubleClickClose", _prefs.tabDoubleClickClose);
+    s.setValue("prefs/tabQuitOnEmpty", _prefs.tabQuitOnEmpty);
+    s.setValue("prefs/tabCompactLabelLen", _prefs.tabCompactLabelLen);
+    s.setValue("prefs/tabReduce", _prefs.tabReduce);
+    s.setValue("prefs/tabInactiveColor", _prefs.tabInactiveColor);
+    s.setValue("prefs/tabActiveTopBar", _prefs.tabActiveTopBar);
+    s.setValue("prefs/tabShowCloseButton", _prefs.tabShowCloseButton);
+
     s.setValue("prefs/tabWidth", _prefs.tabWidth);
     s.setValue("prefs/tabToSpaces", _prefs.tabToSpaces);
     s.setValue("prefs/wordWrap", _prefs.wordWrap);
-    s.setValue("prefs/darkMode", _prefs.darkMode);
     s.setValue("prefs/showLineNumbers", _prefs.showLineNumbers);
     s.setValue("prefs/showFoldMargin", _prefs.showFoldMargin);
     s.setValue("prefs/showIndentGuides", _prefs.showIndentGuides);
     s.setValue("prefs/showWhitespace", _prefs.showWhitespace);
     s.setValue("prefs/showEOL", _prefs.showEOL);
+
+    s.setValue("prefs/fontName", _prefs.fontName);
+    s.setValue("prefs/fontSize", _prefs.fontSize);
+    s.setValue("prefs/fontSmooth", _prefs.fontSmooth);
+
+    s.setValue("prefs/themeName", _prefs.themeName);
+
     s.setValue("prefs/defaultEOL", _prefs.defaultEOL);
     s.setValue("prefs/defaultEncoding", _prefs.defaultEncoding);
+    s.setValue("prefs/defaultLanguage", _prefs.defaultLanguage);
+
+    s.setValue("prefs/autoCompletion", _prefs.autoCompletion);
+    s.setValue("prefs/autoCompletionMinChars", _prefs.autoCompletionMinChars);
+    s.setValue("prefs/autoCompletionType", _prefs.autoCompletionType);
+    s.setValue("prefs/autoCompletionIgnoreNumbers", _prefs.autoCompletionIgnoreNumbers);
+
+    s.setValue("prefs/highlightMatchingWords", _prefs.highlightMatchingWords);
+    s.setValue("prefs/highlightMatchingBraces", _prefs.highlightMatchingBraces);
+    s.setValue("prefs/highlightMatchCase", _prefs.highlightMatchCase);
+    s.setValue("prefs/highlightMatchWholeWord", _prefs.highlightMatchWholeWord);
+
     s.setValue("prefs/rememberSession", _prefs.rememberSession);
     s.setValue("prefs/snapshotBackup", _prefs.snapshotBackup);
     s.setValue("prefs/backupIntervalSec", _prefs.backupIntervalSec);

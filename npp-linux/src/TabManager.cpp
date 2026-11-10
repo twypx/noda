@@ -4,7 +4,38 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QStyle>
 #include <QTabBar>
+
+namespace {
+void repolishTabBar(QTabBar* bar) {
+    bar->style()->unpolish(bar);
+    bar->style()->polish(bar);
+    bar->update();
+}
+} // namespace
+
+void TabManager::scheduleTabBarRepolish() {
+    if (_styleBatchDepth > 0) {
+        _styleBatchDirty = true;
+        return;
+    }
+    repolishTabBar(tabBar());
+    ++_styleRepolishCount;
+}
+
+void TabManager::beginStyleBatch() {
+    ++_styleBatchDepth;
+}
+
+void TabManager::endStyleBatch() {
+    if (_styleBatchDepth > 0) --_styleBatchDepth;
+    if (_styleBatchDepth == 0 && _styleBatchDirty) {
+        _styleBatchDirty = false;
+        repolishTabBar(tabBar());
+        ++_styleRepolishCount;
+    }
+}
 
 TabManager::TabManager(QWidget* parent) : QTabWidget(parent) {
     setTabsClosable(true);
@@ -20,6 +51,19 @@ TabManager::TabManager(QWidget* parent) : QTabWidget(parent) {
 }
 
 bool TabManager::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == tabBar() && event->type() == QEvent::MouseButtonDblClick) {
+        if (_doubleClickClose) {
+            auto* me = static_cast<QMouseEvent*>(event);
+            if (me->button() == Qt::LeftButton) {
+                int index = tabBar()->tabAt(me->position().toPoint());
+                if (index >= 0) {
+                    closeTab(index);
+                    event->accept();
+                    return true;
+                }
+            }
+        }
+    }
     if (watched == tabBar() && event->type() == QEvent::ContextMenu) {
         auto* ce = static_cast<QContextMenuEvent*>(event);
         int index = tabBar()->tabAt(tabBar()->mapFromGlobal(ce->globalPos()));
@@ -134,6 +178,10 @@ void TabManager::updateTabTitle(int index) {
     if (!ed) return;
 
     QString title = QString::fromStdString(ed->buffer()->getFileName());
+    // 上游 tabCompactLabelLen：0 表示不截断，超出长度用省略号，完整路径仍在 tooltip 里。
+    if (_compactLabelLength > 0 && title.size() > _compactLabelLength) {
+        title = title.left(_compactLabelLength) + QStringLiteral("...");
+    }
     if (ed->buffer()->isModified()) {
         title += "*";
     }
@@ -177,7 +225,12 @@ bool TabManager::closeTab(int index) {
     delete ed;
 
     if (count() == 0) {
-        createNewTab();
+        // 上游 quitOnEmpty：不再补一个空文档，而是请求主窗口退出。
+        if (_quitOnEmpty) {
+            emit quitOnEmptyRequested();
+        } else {
+            createNewTab();
+        }
     }
     return true;
 }
@@ -187,6 +240,7 @@ bool TabManager::closeAll() {
         if (!closeTab(count() - 1)) {
             return false;
         }
+        if (count() == 0) break; // quitOnEmpty 生效时不再继续 closeTab(0)
         if (count() == 1 && editorAt(0)->buffer()->getFilePath().empty() && !editorAt(0)->buffer()->isModified()) {
             break;
         }
@@ -301,4 +355,49 @@ void TabManager::onTabCloseRequested(int index) {
 
 void TabManager::onCurrentChanged(int index) {
     emit activeEditorChanged(editorAt(index));
+}
+
+void TabManager::setTabReduce(bool reduce) {
+    if (_tabReduce == reduce) return;
+    _tabReduce = reduce;
+    // 动态属性驱动主题 QSS，不塞局部样式表（会覆盖选中态并触发整棵子树重算）。
+    QTabBar* bar = tabBar();
+    bar->setProperty("compact", reduce);
+    scheduleTabBarRepolish();
+}
+
+void TabManager::setTabBarHidden(bool hide) {
+    if (_tabBarHidden == hide) return;
+    _tabBarHidden = hide;
+    setTabBarAutoHide(false); // 上游 hide 是“始终隐藏”，不是单标签自动隐藏
+    tabBar()->setVisible(!hide);
+}
+
+void TabManager::setVerticalTabs(bool vertical) {
+    if (_verticalTabs == vertical) return;
+    _verticalTabs = vertical;
+    setTabPosition(vertical ? QTabWidget::West : QTabWidget::North);
+}
+
+void TabManager::setActiveTopBar(bool draw) {
+    if (_activeTopBar == draw) return;
+    _activeTopBar = draw;
+    QTabBar* bar = tabBar();
+    bar->setProperty("activeTopBar", draw);
+    scheduleTabBarRepolish();
+}
+
+void TabManager::setInactiveColored(bool on) {
+    if (_inactiveColored == on) return;
+    _inactiveColored = on;
+    QTabBar* bar = tabBar();
+    bar->setProperty("inactiveColored", on);
+    scheduleTabBarRepolish();
+}
+
+void TabManager::setCompactLabelLength(int length) {
+    const int clamped = qMax(0, qMin(257, length)); // 上游 NB_MAX_TAB_COMPACT_LABEL_LEN
+    if (_compactLabelLength == clamped) return;
+    _compactLabelLength = clamped;
+    for (int i = 0; i < count(); ++i) updateTabTitle(i);
 }

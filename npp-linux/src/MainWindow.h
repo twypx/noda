@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QFont>
 #include <QLabel>
 #include <QFileSystemWatcher>
 #include <QActionGroup>
@@ -56,6 +57,10 @@ public:
 
     // 处理来自 IPC（其他进程尝试打开文件）的文件列表，在原有标签管理器中打开并激活窗口
     void openFilesFromIpc(const QStringList& files);
+
+    // force=true 用于启动时：此时 _prefs 已从 QSettings 载入，无法靠新旧值比较判断“尚未应用”。
+    void applyPreferences(const AppPreferences& prefs, bool force = false);
+    const AppPreferences& preferences() const { return _prefs; }
 
     // 按 index 构造标签右键菜单但不弹出。正常路径由 showTabContextMenu() 调用，
     // 回归测试直接检查菜单结构与启用/勾选状态。调用方负责 delete。
@@ -248,12 +253,15 @@ private:
     void updateLanguageUI(const QString& langId);
     void setLanguage(const QString& langId);
     void applyDarkModePalette(bool dark);
-    void applyPreferences(const AppPreferences& prefs);
     // 视图类开关（自动换行 / 显示符号 / 缩进参考线）是全局持续状态，对所有标签页生效，
     // 不能只改当前编辑器，否则切到另一个标签页就发现“没生效”。
     void forEachEditor(const std::function<void(EditorView*)>& fn);
     void loadPreferences();
     void savePreferences();
+    // 界面字体：en 在前、zh 在后形成回退链；两者都为空时恢复启动时的系统字体。
+    void applyUiFonts(const AppPreferences& prefs);
+    // 读取官方主题文件并替换 StyleManager 的 LexerStyles；Default 表示恢复内置样式。
+    void applyThemePreference(const QString& themeName);
 
     // 将 QSettings 中持久化的“样式配置器”覆盖回灌到 StyleManager 并重绘所有编辑器。
     // Q_INVOKABLE 让回归测试能通过元对象验证持久化值真的作用到编辑器。
@@ -266,9 +274,10 @@ private:
     void openDroppedUrl(const QUrl& url);
 
     friend class TestMainWindow;
+    friend class TestPreferencesDialog;
 
     // ---- 会话快照（session.xml + backup/）----
-    // 复刻 Notepad++ 的“记住上次会话 + 周期性备份”：退出时不弹保存询问，
+    // 「记住上次会话 + 周期性备份」：退出时不弹保存询问，
     // 脏内容落盘到 backup/，下次启动按 session.xml 原样恢复。
     bool restoreSession();
     void saveSession();
@@ -289,6 +298,7 @@ private:
     QSet<QString> _savingPaths;
 
     AppPreferences _prefs;
+    QFont _defaultUiFont;
     bool _isDarkMode{false};
     // 周期性把脏缓冲区写成备份的定时器（同上游 launchDocumentBackupTask 的睡眠线程）。
     QTimer* _backupTimer{nullptr};

@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct LexerStyle {
@@ -56,6 +57,12 @@ struct ConfigLoadReport {
     std::size_t styleCount{0};
 };
 
+// Notepad++ 官方主题文件（PowerEditor/installer/themes/*.xml）的描述。
+struct ThemeInfo {
+    std::string name;   // 不含 .xml 的显示名
+    std::string path;   // 完整路径
+};
+
 class StyleManager {
 public:
     static StyleManager& instance() {
@@ -75,6 +82,9 @@ public:
 
     std::string detectLanguageByExt(const std::string& ext) const;
     std::string getLexerName(const std::string& langName) const;
+    // 把旧版显示名（C++、Shell）或语言 id 统一折算成 langs.model.xml 的 id；
+    // 不认识的值返回 "normal"，避免把无效语言名传给词法器。
+    std::string resolveLanguageId(const std::string& nameOrId) const;
     const std::vector<LexerStyle>* getStyles(const std::string& langName) const;
     const LanguageDefinition* getLanguage(const std::string& langName) const;
     const GlobalStyles& getGlobalStyles() const { return _globalStyles; }
@@ -92,12 +102,30 @@ public:
     // 已加载的全部语言名（供样式配置器列表使用）。
     std::vector<std::string> languageNames() const;
 
+    // 扫描 <appDir>/themes、<prefix>/share/notepad-plus-plus-linux/themes 等位置，
+    // 返回按名称排序的官方主题列表；"Default"（内置 stylers）不在其中。
+    static std::vector<ThemeInfo> locateThemes(const std::string& appDir);
+    // 主题文件是安装期静态资源；仅在安装/卸载主题或测试时清空内存缓存。
+    static void invalidateThemeCache();
+
+    // 应用一个主题 XML：只覆盖其中出现的 LexerType，其余语言回退到 stylers.model.xml。
+    bool applyThemeFile(const std::string& path, std::string* error = nullptr);
+    // 恢复内置 stylers.model.xml 的样式。
+    void resetTheme();
+    bool hasCustomTheme() const { return !_themePath.empty(); }
+    // 当前主题是否真的定义了该语言的样式（深色模式下决定背景是否跟主题走）。
+    bool hasThemeStyle(const std::string& langName) const;
+
 private:
     StyleManager() = default;
 
     std::unordered_map<std::string, LanguageDefinition> _languages; // langName -> def
     std::unordered_map<std::string, std::string> _extToLang;        // ext -> langName
     std::unordered_map<std::string, std::vector<LexerStyle>> _styles; // langName -> styles
+    // stylers.model.xml 的原始样式；切换/恢复主题时作为兜底，避免丢失语言。
+    std::unordered_map<std::string, std::vector<LexerStyle>> _baseStyles;
+    std::unordered_set<std::string> _themedLanguages;
+    std::string _themePath;
     GlobalStyles _globalStyles;
     ConfigLoadReport _lastReport;
 };

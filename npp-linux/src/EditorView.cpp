@@ -10,8 +10,11 @@
 #include <QByteArray>
 #include <QApplication>
 #include <QClipboard>
+#include <QDebug>
 #include <QStringList>
+#include <QElapsedTimer>
 #include <QSet>
+#include <QTimer>
 #include <algorithm>
 #include <vector>
 #include <cctype>
@@ -36,7 +39,18 @@ EditorView::EditorView(QWidget* parent)
         _buffer->setBackupDirty(true);
     });
 
+    // 选中词高亮防抖：拖动选择时每次 updateUi 都全文档搜索会明显拖慢大文件。
+    _hlTimer = new QTimer(this);
+    _hlTimer->setSingleShot(true);
+    _hlTimer->setInterval(120);
+    connect(_hlTimer, &QTimer::timeout, this, &EditorView::updateSmartHighlight);
+
     connect(this, &ScintillaEditBase::updateUi, this, &EditorView::onUpdateUi);
+
+    // 自动补全：与上游 AutoCompletion::update 一样，在字符输入后按当前词前缀触发。
+    connect(this, &ScintillaEditBase::charAdded, this, [this](int ch) {
+        updateAutoCompletion(ch);
+    });
 
     connect(this, &ScintillaEditBase::marginClicked, this, [this](Scintilla::Position pos, Scintilla::KeyMod, int margin) {
         if (margin == 1) {
@@ -57,6 +71,17 @@ EditorView::EditorView(QWidget* parent)
 static inline int scRgb(int r, int g, int b) {
     return (b << 16) | (g << 8) | r;
 }
+
+// 8-12 已被「格式标记」占用，选中词高亮用 7、括号高亮用 6。
+static constexpr int kBraceHighlightIndicator = 6;
+static constexpr int kSmartHighlightIndicator = 7;
+// 单次最多标记的匹配数，避免在超长文件里把整个文档都涂满。
+static constexpr int kMaxSmartHighlightMatches = 1000;
+// 选词高亮只覆盖「当前视口 ±N 行」：屏幕之外的数 MB 内容涂了也看不见。
+// 缓冲带让小幅滚动不必重算，滚出带外再由 updateUi 的滚动通知刷新。
+static constexpr sptr_t kHighlightContextLines = 200;
+// 单次重算的时间预算，超时立即熔断，绝不让选词拖住 UI 线程。
+static constexpr qint64 kHighlightBudgetMs = 5;
 
 void EditorView::setupMarkdownStyles(bool isDark) {
     int fs = (_fontSize > 0) ? _fontSize : 10;
@@ -177,6 +202,11 @@ void EditorView::updateEditorChromeStyles() {
         send(SCI_SETFOLDMARGINCOLOUR, 1, scRgb(40, 40, 40));
         send(SCI_SETFOLDMARGINHICOLOUR, 1, scRgb(40, 40, 40));
         send(SCI_SETMARGINBACKN, 1, scRgb(35, 35, 35));
+        send(SCI_STYLESETFORE, STYLE_BRACELIGHT, scRgb(255, 214, 120));
+        send(SCI_STYLESETBACK, STYLE_BRACELIGHT, scRgb(78, 64, 38));
+        send(SCI_STYLESETBOLD, STYLE_BRACELIGHT, 1);
+        send(SCI_STYLESETFORE, STYLE_BRACEBAD, scRgb(255, 110, 110));
+        send(SCI_STYLESETBACK, STYLE_BRACEBAD, scRgb(90, 40, 40));
     } else {
         const auto& gs = StyleManager::instance().getGlobalStyles();
         send(SCI_STYLESETBACK, STYLE_DEFAULT, scRgb(255, 255, 255));
@@ -192,6 +222,11 @@ void EditorView::updateEditorChromeStyles() {
         send(SCI_SETFOLDMARGINCOLOUR, 1, gs.foldMarginBg != -1 ? gs.foldMarginBg : scRgb(246, 246, 246));
         send(SCI_SETFOLDMARGINHICOLOUR, 1, gs.foldMarginBg != -1 ? gs.foldMarginBg : scRgb(246, 246, 246));
         send(SCI_SETMARGINBACKN, 1, gs.lineMarginBg != -1 ? gs.lineMarginBg : scRgb(250, 250, 250));
+        send(SCI_STYLESETFORE, STYLE_BRACELIGHT, scRgb(70, 50, 0));
+        send(SCI_STYLESETBACK, STYLE_BRACELIGHT, scRgb(255, 232, 163));
+        send(SCI_STYLESETBOLD, STYLE_BRACELIGHT, 1);
+        send(SCI_STYLESETFORE, STYLE_BRACEBAD, scRgb(160, 30, 30));
+        send(SCI_STYLESETBACK, STYLE_BRACEBAD, scRgb(255, 220, 220));
     }
 }
 
@@ -264,6 +299,22 @@ void EditorView::initEditorDefaults() {
         sends(SCI_STYLESETFONT, i, fn.c_str());
         send(SCI_STYLESETSIZE, i, fs);
     }
+
+    // 6. 高亮匹配指示器（首选项「高亮匹配」使用；8-12 已被格式标记占用）
+    auto configureIndicator = [this](int indic, int r, int g, int b) {
+        send(SCI_INDICSETSTYLE, indic, INDIC_ROUNDBOX);
+        send(SCI_INDICSETFORE, indic, scRgb(r, g, b));
+        send(SCI_INDICSETALPHA, indic, 90);
+        send(SCI_INDICSETOUTLINEALPHA, indic, 140);
+        // 指示器值为 0 时仍被视为“无标记”，显式置 1。
+        send(SCI_SETINDICATORCURRENT, indic);
+        send(SCI_SETINDICATORVALUE, 1);
+    };
+    configureIndicator(kBraceHighlightIndicator, 120, 82, 238);
+    configureIndicator(kSmartHighlightIndicator, 255, 165, 0);
+
+    // 用指示器绘制匹配括号，避免 STYLE_BRACELIGHT 在深色主题下不可见。
+    send(SCI_BRACEHIGHLIGHTINDICATOR, 1, kBraceHighlightIndicator);
 
     updateEditorChromeStyles();
     updateLineNumberMarginWidth(true);
@@ -585,7 +636,15 @@ void EditorView::applyLanguage(const std::string& langName) {
     // 2. 挂载或卸载词法分析器
     if (lexerName != "null") {
         void* pLexer = CreateLexer(lexerName.c_str());
-        send(SCI_SETILEXER, 0, reinterpret_cast<sptr_t>(pLexer));
+        if (!pLexer) {
+            // CreateLexer 只按名字精确匹配 Lexilla 目录。传 nullptr 给 SCI_SETILEXER 会
+            // 静默退化成「识别出语言但全文不着色」，正是 .ts 之前的症状，必须显式诊断。
+            qWarning("EditorView: 未找到词法分析器 '%s'（语言 '%s'），该文档将按纯文本显示",
+                     lexerName.c_str(), langName.c_str());
+            send(SCI_SETILEXER, 0, 0);
+        } else {
+            send(SCI_SETILEXER, 0, reinterpret_cast<sptr_t>(pLexer));
+        }
     } else {
         send(SCI_SETILEXER, 0, 0);
     }
@@ -661,6 +720,21 @@ void EditorView::applyLanguage(const std::string& langName) {
         applyThemeStyles("javascript");
     }
 
+    // 词法器属性是文档级的，而 TypeScript 与 C/C++/Java 共用 cpp 词法器：每次切换语言
+    // 先复位成 LexCPP 默认值（track=1 / backquoted=0），避免上一种语言的设置泄漏。
+    auto setLexerProperty = [this](const char* key, const char* value) {
+        send(SCI_SETPROPERTY, reinterpret_cast<uptr_t>(key),
+             reinterpret_cast<sptr_t>(value));
+    };
+    setLexerProperty("lexer.cpp.track.preprocessor", "1");
+    setLexerProperty("lexer.cpp.backquoted.strings", "0");
+    if (langName == "typescript") {
+        // 对齐上游 ScintillaEditView::setTypeScriptLexer()：TS 的 # 是私有字段而非预处理
+        // 指令，必须关掉跟踪；反引号模板字符串 `...` 也要开启才会被识别成字符串。
+        setLexerProperty("lexer.cpp.track.preprocessor", "0");
+        setLexerProperty("lexer.cpp.backquoted.strings", "1");
+    }
+
     // 启用代码折叠支持
     send(SCI_SETPROPERTY, reinterpret_cast<uptr_t>("fold"), reinterpret_cast<sptr_t>("1"));
     send(SCI_SETPROPERTY, reinterpret_cast<uptr_t>("fold.html"), reinterpret_cast<sptr_t>("1"));
@@ -710,15 +784,18 @@ void EditorView::applyThemeStyles(const std::string& langName) {
     }
     if (!styles) return;
 
+    // 官方主题明确给了背景色时，即使处于深色模式也照主题绘制；否则深色模式会用
+    // 深色默认背景覆盖掉 Monokai 等主题的 #272822。
+    const bool themed = StyleManager::instance().hasThemeStyle(langName);
     for (const auto& s : *styles) {
         if (s.fgColor != -1) {
-            if (_isDarkMode && s.fgColor == 0x000000) {
+            if (_isDarkMode && !themed && s.fgColor == 0x000000) {
                 send(SCI_STYLESETFORE, s.styleID, scRgb(212, 212, 212));
             } else {
                 send(SCI_STYLESETFORE, s.styleID, s.fgColor);
             }
         }
-        if (!_isDarkMode && s.bgColor != -1) {
+        if ((!_isDarkMode || themed) && s.bgColor != -1) {
             send(SCI_STYLESETBACK, s.styleID, s.bgColor);
         }
         send(SCI_STYLESETBOLD, s.styleID, s.bold ? 1 : 0);
@@ -732,8 +809,12 @@ void EditorView::applyThemeStyles(const std::string& langName) {
     }
 
     if (_isDarkMode) {
-        send(SCI_STYLESETBACK, STYLE_DEFAULT, scRgb(28, 28, 28));
-        send(SCI_STYLESETFORE, STYLE_DEFAULT, scRgb(218, 218, 218));
+        // 主题覆盖了当前语言时，默认背景交给主题样式，不再强行刷成窗口深色，
+        // 否则主题的 #272822 会被 #1C1C1C 覆盖。
+        if (!themed) {
+            send(SCI_STYLESETBACK, STYLE_DEFAULT, scRgb(28, 28, 28));
+            send(SCI_STYLESETFORE, STYLE_DEFAULT, scRgb(218, 218, 218));
+        }
         send(SCI_SETCARETLINEBACK, scRgb(37, 34, 48));
         send(SCI_SETCARETFORE, scRgb(168, 130, 255));
     } else {
@@ -1115,12 +1196,329 @@ void EditorView::onUpdateUi(Scintilla::Update updated) {
         _lastLineCount = currentLines;
         updateLineNumberMarginWidth();
     }
-    if (static_cast<int>(updated) & static_cast<int>(Scintilla::Update::Selection)) {
+    const int updatedBits = static_cast<int>(updated);
+    if (updatedBits & static_cast<int>(Scintilla::Update::Selection)) {
         auto pos = send(SCI_GETCURRENTPOS);
         auto line = send(SCI_LINEFROMPOSITION, pos);
         auto col = send(SCI_GETCOLUMN, pos);
         emit cursorPositionChanged(static_cast<int>(line + 1), static_cast<int>(col + 1));
+
+        updateBraceHighlight();
+        // 选中词高亮防抖：拖动选区时不至于每像素全文档搜索。
+        if (_hlWords) {
+            _hlTimer->start();
+        } else {
+            updateSmartHighlight();
+        }
     }
+
+    // 视口优先高亮：滚出已标记的 ±200 行缓冲带后重算一次，保证新视口里的匹配仍然可见。
+    // 与选区共用同一个 120ms 防抖定时器，连续滚动只会在停下来的那一帧算一次。
+    if (_hlWords && !_hlQuery.isEmpty()
+        && (updatedBits & (static_cast<int>(Scintilla::Update::VScroll)
+                         | static_cast<int>(Scintilla::Update::HScroll)))) {
+        _hlTimer->start();
+    }
+}
+
+void EditorView::setHighlightPrefs(bool matchingWords, bool matchingBraces,
+                                   bool matchCase, bool wholeWord) {
+    if (_hlWords == matchingWords && _hlBraces == matchingBraces
+        && _hlMatchCase == matchCase && _hlWholeWord == wholeWord) {
+        return;
+    }
+    _hlWords = matchingWords;
+    _hlBraces = matchingBraces;
+    _hlMatchCase = matchCase;
+    _hlWholeWord = wholeWord;
+    _hlQuery.clear();
+    _hlFlags = -1;
+    refreshHighlighting();
+}
+
+void EditorView::refreshHighlighting() {
+    if (_hlTimer) _hlTimer->stop();
+    updateBraceHighlight();
+    updateSmartHighlight();
+}
+
+void EditorView::updateBraceHighlight() {
+    auto clearBrace = [this]() {
+        _braceStart = -1;
+        _braceEnd = -1;
+        send(SCI_BRACEHIGHLIGHT, -1, -1);
+    };
+
+    if (!_hlBraces) {
+        clearBrace();
+        return;
+    }
+
+    auto isBrace = [](int ch) {
+        return ch == '(' || ch == ')' || ch == '[' || ch == ']'
+            || ch == '{' || ch == '}';
+    };
+
+    sptr_t position = send(SCI_GETCURRENTPOS);
+    int ch = static_cast<int>(send(SCI_GETCHARAT, position));
+    if (!isBrace(ch) && position > 0) {
+        --position;
+        ch = static_cast<int>(send(SCI_GETCHARAT, position));
+    }
+    if (!isBrace(ch)) {
+        clearBrace();
+        return;
+    }
+
+    const sptr_t match = send(SCI_BRACEMATCH, position, 0);
+    if (match < 0) {
+        clearBrace();
+        return;
+    }
+    _braceStart = static_cast<int>(position);
+    _braceEnd = static_cast<int>(match);
+    send(SCI_BRACEHIGHLIGHT, position, match);
+}
+
+void EditorView::updateSmartHighlight() {
+    const sptr_t length = send(SCI_GETLENGTH);
+    auto clearIndicator = [this, length]() {
+        // 指示器是稀疏区间，整段清一次是 O(log n)，不随文件长度线性增长。
+        // 保留全文清除可避免文档编辑后留下错位的旧标记。
+        send(SCI_SETINDICATORCURRENT, kSmartHighlightIndicator);
+        send(SCI_INDICATORCLEARRANGE, 0, length);
+        _hlMarkedStart = 0;
+        _hlMarkedEnd = 0;
+        _hlQuery.clear();
+        _hlFlags = -1;
+    };
+
+    if (!_hlWords) {
+        clearIndicator();
+        return;
+    }
+
+    const sptr_t start = send(SCI_GETSELECTIONSTART);
+    const sptr_t end = send(SCI_GETSELECTIONEND);
+    if (end <= start || end - start > 128) {
+        clearIndicator();
+        return;
+    }
+
+    // SCI_GETSELTEXT 在 lParam==0 时返回的是“不含结尾 NUL”的字符数，
+    // 因此缓冲区要多留 1 字节，再按实际长度截断。
+    const sptr_t textLength = send(SCI_GETSELTEXT, 0, 0);
+    if (textLength <= 0) {
+        clearIndicator();
+        return;
+    }
+    std::string selected(static_cast<size_t>(textLength) + 1, '\0');
+    send(SCI_GETSELTEXT, static_cast<uptr_t>(textLength + 1),
+         reinterpret_cast<sptr_t>(selected.data()));
+    selected.resize(static_cast<size_t>(textLength));
+
+    for (unsigned char ch : selected) {
+        if (std::isspace(ch)) {
+            clearIndicator();
+            return;
+        }
+    }
+
+    int flags = 0;
+    if (_hlMatchCase) flags |= SCFIND_MATCHCASE;
+    if (_hlWholeWord) flags |= SCFIND_WHOLEWORD;
+
+    const QString query = QString::fromUtf8(selected.data(), static_cast<int>(selected.size()));
+
+    // 只扫描「当前视口 ±200 行」。display line 先折算成 doc line 并夹到合法范围，
+    // 折叠、空文档、视口尚未布局时都不能让范围退化成全文扫描。
+    const sptr_t lineCount = qMax<sptr_t>(1, send(SCI_GETLINECOUNT));
+    auto clampLine = [lineCount](sptr_t line) {
+        if (line < 0) return lineCount - 1;
+        return qMin<sptr_t>(line, lineCount - 1);
+    };
+    const sptr_t firstVisible = qMax<sptr_t>(0, send(SCI_GETFIRSTVISIBLELINE));
+    const sptr_t linesOnScreen = qMax<sptr_t>(1, send(SCI_LINESONSCREEN));
+    const sptr_t topLine = clampLine(send(SCI_DOCLINEFROMVISIBLE, firstVisible));
+    const sptr_t bottomLine = clampLine(send(SCI_DOCLINEFROMVISIBLE,
+                                            firstVisible + linesOnScreen));
+    const sptr_t rangeStart = send(SCI_POSITIONFROMLINE,
+                                   qMax<sptr_t>(0, topLine - kHighlightContextLines));
+    const sptr_t rangeEnd = qMin<sptr_t>(length, send(SCI_GETLINEENDPOSITION,
+                                   clampLine(bottomLine + kHighlightContextLines)));
+
+    // 同一查询且新视口仍落在已标记窗口内：缓冲带吸收小幅滚动，不重复扫描。
+    if (query == _hlQuery && flags == _hlFlags
+        && rangeStart >= _hlMarkedStart && rangeEnd <= _hlMarkedEnd) return;
+
+    clearIndicator();
+    if (rangeEnd <= rangeStart) return;
+    _hlQuery = query;
+    _hlFlags = flags;
+
+    const QByteArray needle(selected.data(), static_cast<int>(selected.size()));
+    send(SCI_SETSEARCHFLAGS, flags);
+    send(SCI_SETINDICATORCURRENT, kSmartHighlightIndicator);
+
+    QElapsedTimer budget;
+    budget.start();
+    sptr_t searchFrom = rangeStart;
+    int matches = 0;
+    while (searchFrom <= rangeEnd && matches < kMaxSmartHighlightMatches
+           && budget.elapsed() < kHighlightBudgetMs) {
+        send(SCI_SETTARGETSTART, searchFrom);
+        send(SCI_SETTARGETEND, rangeEnd);
+        const sptr_t found = sends(SCI_SEARCHINTARGET, needle.size(), needle.constData());
+        if (found < 0) break;
+        const sptr_t matchStart = send(SCI_GETTARGETSTART);
+        const sptr_t matchEnd = send(SCI_GETTARGETEND);
+        if (matchEnd <= matchStart) break;
+        send(SCI_INDICATORFILLRANGE, matchStart, matchEnd - matchStart);
+        searchFrom = matchEnd;
+        ++matches;
+    }
+    _hlMarkedStart = rangeStart;
+    _hlMarkedEnd = rangeEnd;
+}
+
+void EditorView::setAutoCompletion(bool enabled, int minChars, int type, bool ignoreNumbers) {
+    _autoCompletion = enabled;
+    _autoCompletionMinChars = std::max(1, minChars);
+    _autoCompletionType = (type == 1) ? 1 : 0;
+    _autoCompletionIgnoreNumbers = ignoreNumbers;
+    if (!enabled) send(SCI_AUTOCCANCEL);
+}
+
+void EditorView::updateAutoCompletion(int ch) {
+    if (!_autoCompletion) return;
+    if (send(SCI_AUTOCACTIVE) != 0) return;
+
+    const unsigned char byte = static_cast<unsigned char>(ch);
+    if (!(std::isalnum(byte) || ch == '_' || byte >= 0x80)) return;
+
+    // 超大文档里每次按键做正则全文档扫描会明显卡顿，直接跳过补全（远大于常规源码文件）。
+    const sptr_t docLength = send(SCI_GETLENGTH);
+    if (docLength > 4 * 1024 * 1024) return;
+
+    const sptr_t currentPos = send(SCI_GETCURRENTPOS);
+    const sptr_t startPos = send(SCI_WORDSTARTPOSITION, currentPos, 1);
+    if (currentPos <= startPos) return;
+
+    const sptr_t prefixLength = currentPos - startPos;
+    if (prefixLength < _autoCompletionMinChars || prefixLength >= 64) return;
+
+    const char* prefixPtr = reinterpret_cast<const char*>(
+        send(SCI_GETRANGEPOINTER, startPos, prefixLength));
+    if (!prefixPtr) return;
+    const std::string prefix(prefixPtr, static_cast<size_t>(prefixLength));
+
+    bool allDigits = true;
+    for (unsigned char c : prefix) {
+        if (!std::isdigit(c)) { allDigits = false; break; }
+    }
+    if (_autoCompletionIgnoreNumbers && allDigits) return;
+
+    const sptr_t endPos = send(SCI_WORDENDPOSITION, currentPos, 1);
+    QString currentWord;
+    if (endPos > startPos) {
+        const char* wholePtr = reinterpret_cast<const char*>(
+            send(SCI_GETRANGEPOINTER, startPos, endPos - startPos));
+        if (wholePtr) currentWord = QString::fromUtf8(wholePtr, static_cast<int>(endPos - startPos));
+    }
+
+    // 候选表达式：词首 + 前缀 + 非分隔符。
+    const std::string expr = "\\<" + prefix
+        + "[^ \\t\\n\\r.,;:\"(){}=<>'+!?\\[\\]]+";
+    send(SCI_SETSEARCHFLAGS, SCFIND_WORDSTART | SCFIND_REGEXP | SCFIND_POSIX);
+
+    QSet<QString> seen;
+    QStringList words;
+    sptr_t searchPos = 0;
+    // 每次按键最多花 5ms 收集候选：大文件里也不会把输入线程拖住。
+    QElapsedTimer budget;
+    budget.start();
+    while (searchPos < docLength && words.size() < 2000 && budget.elapsed() < 5) {
+        send(SCI_SETTARGETSTART, searchPos);
+        send(SCI_SETTARGETEND, docLength);
+        if (sends(SCI_SEARCHINTARGET, expr.size(), expr.c_str()) < 0) break;
+
+        const sptr_t wordStart = send(SCI_GETTARGETSTART);
+        const sptr_t wordEnd = send(SCI_GETTARGETEND);
+        if (wordEnd <= wordStart) break;
+        if (wordEnd - wordStart < 256) {
+            const char* wordPtr = reinterpret_cast<const char*>(
+                send(SCI_GETRANGEPOINTER, wordStart, wordEnd - wordStart));
+            if (wordPtr) {
+                const QString word = QString::fromUtf8(
+                    wordPtr, static_cast<int>(wordEnd - wordStart));
+                if (!word.isEmpty() && word != currentWord && !seen.contains(word)) {
+                    seen.insert(word);
+                    words.append(word);
+                }
+            }
+        }
+        searchPos = wordEnd;
+    }
+
+    // 补全类型 0 = 文档词 + 当前语言关键字；类型 1 = 仅文档词。
+    if (_autoCompletionType == 0) {
+        const LanguageDefinition* definition =
+            StyleManager::instance().getLanguage(_currentLang);
+        if (definition) {
+            auto matchesPrefix = [&prefix](const char* data, size_t size) {
+                if (size < prefix.size()) return false;
+                for (size_t i = 0; i < prefix.size(); ++i) {
+                    if (std::tolower(static_cast<unsigned char>(data[i]))
+                        != std::tolower(static_cast<unsigned char>(prefix[i]))) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+
+            for (const auto& entry : definition->rawKeywords) {
+                const std::string& keywords = entry.second;
+                size_t i = 0;
+                while (i < keywords.size() && words.size() < 2000
+                       && budget.elapsed() < 5) {
+                    while (i < keywords.size()
+                           && std::isspace(static_cast<unsigned char>(keywords[i]))) {
+                        ++i;
+                    }
+                    const size_t start = i;
+                    while (i < keywords.size()
+                           && !std::isspace(static_cast<unsigned char>(keywords[i]))) {
+                        ++i;
+                    }
+                    if (i <= start) continue;
+                    const size_t length = i - start;
+                    if (length >= 256 || !matchesPrefix(keywords.data() + start, length))
+                        continue;
+                    const QString candidate = QString::fromUtf8(
+                        keywords.data() + start, static_cast<int>(length));
+                    if (candidate.isEmpty() || candidate == currentWord
+                        || seen.contains(candidate)) {
+                        continue;
+                    }
+                    seen.insert(candidate);
+                    words.append(candidate);
+                }
+                if (words.size() >= 2000 || budget.elapsed() >= 5) break;
+            }
+        }
+    }
+
+    if (words.isEmpty()) return;
+    std::sort(words.begin(), words.end(), [](const QString& a, const QString& b) {
+        return a.compare(b, Qt::CaseInsensitive) < 0;
+    });
+
+    const QByteArray list = words.join(QLatin1Char(' ')).toUtf8();
+    send(SCI_AUTOCSETSEPARATOR, static_cast<uptr_t>(' '));
+    send(SCI_AUTOCSETIGNORECASE, 1);
+    send(SCI_AUTOCSETCASEINSENSITIVEBEHAVIOUR, 1);
+    sends(SCI_AUTOCSHOW, static_cast<uptr_t>(prefixLength),
+          const_cast<char*>(list.constData()));
 }
 
 bool EditorView::findNext(const QString& text, bool matchCase, bool wholeWord, bool regex) {

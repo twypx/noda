@@ -14,7 +14,7 @@ ShortcutsDialog::ShortcutsDialog(QWidget* actionRoot, QWidget* parent)
     : QDialog(parent)
     , _actionRoot(actionRoot)
 {
-    setWindowTitle("快捷键映射器 (Shortcut Mapper)");
+    setWindowTitle("快捷键映射器");
     resize(780, 560);
 
     auto* layout = new QVBoxLayout(this);
