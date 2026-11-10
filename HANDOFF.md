@@ -103,6 +103,8 @@ v1.0.7 / v1.0.8 已提交：拖拽文件到窗口打开、透明抠图图标重�
 
 模块 P（文件比对，尚未提交）：原实现存在 O(D²) 内存、抢占 TabManager 页面、行内差异只算前后缀等问题；已整改为 Histogram 锚点 + 有界 Myers、字符级行内 diff、`currentTextView()` 零拷贝、独立只读副本比对、16MB 护栏，并新增忽略空白/大小写选项。详见 `docs/开发计划2.md` 模块 P.6。
 
+模块 P.7-CI（GitHub Actions 工作流失败修复，尚未提交）：`Build & Release` 报 `npp_tests` Failed / CTest exit 8，根因是 `langs.model.xml` / `stylers.model.xml` 原先只挂在 `noda` 的 `POST_BUILD` 复制，而 CI 的 `run_tests.sh` 只构建 `npp_tests`，干净构建目录缺这两个 XML，导致 8 个依赖 `loadRealConfigs()` 的用例失败（本地因曾构建过 `noda` 被掩盖）。已改为 `configure_file(... COPYONLY)` 在 configure 阶段落地，并在 `run_tests.sh` 增加 4 类资源前置校验；顺带把 `project(NotepadPlusPlus_Linux)` 改名为 `project(Noda)`。验证：干净构建目录 + CI 环境变量 + 仅构建 `npp_tests` → CTest 100%；`./tests/run_tests.sh` exit 0；`./build_deb.sh` 正常产出 deb。详见 `docs/开发计划2.md` P.7.5。
+
 模块 P.7（所有未落地项收口，尚未提交）：wyhash 风格块哈希、Moved 块检测（含开关）、选区比对、`QProcess` 版 Git HEAD / SVN BASE 比对（零链接依赖）、`QtConcurrent` 异步比对 + 「正在比对…」状态、按 alignment 文档行映射的垂直滚动同步（消除 annotation 占位漂移）、`DiffMiniMap` 差异分布小地图；改名收尾：启动时一次性迁移 `~/.config/Notepad++` → `~/.config/Noda`（幂等、不覆盖）、hicolor 启动器图标同步到新手绘图案；文档双语收口：`npp-linux/README.md` 改为英文默认技术文档，完整中文版迁至 `docs/README.technical.zh-CN.md`，两版落地页修正旧二进制名并补文档导航。详见 `docs/开发计划2.md` 模块 P.7。
 
 模块 O（英文界面本地化补全，尚未提交）：修复英文模式下菜单/工具栏 tooltip/设置项/状态栏残留中文。做法：语言下拉改用原生名称（简体中文 / English）并标记 `nppNoL10n` 不翻译；`extraDictionary` 增补约 100 条（工具栏/菜单动作、折叠与格式层次、编码子菜单、查找替换、状态栏模板、URL 链接）；新增 `translateTooltip()` 处理「名称 (Ctrl+X)」形式；状态栏改为运行期按语言拼接并加 `languageChanged` 信号刷新。验收测试 `tests/test_localization.cpp` 在主窗口与设置对话框上断言 0 处中文。

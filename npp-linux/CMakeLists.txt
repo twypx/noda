@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(NotepadPlusPlus_Linux
+project(Noda
     VERSION 1.0.13
     LANGUAGES CXX C)
 
@@ -198,15 +198,15 @@ add_executable(noda
     $<TARGET_OBJECTS:npp_core>
 )
 
-# 自动将 langs.model.xml 和 stylers.model.xml 复制到构建输出目录，保证开箱即用
-add_custom_command(TARGET noda POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${POWEREDITOR_SRC}/langs.model.xml"
-        "${CMAKE_CURRENT_BINARY_DIR}/langs.model.xml"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${POWEREDITOR_SRC}/stylers.model.xml"
-        "${CMAKE_CURRENT_BINARY_DIR}/stylers.model.xml"
-)
+# 语言/主题模型 XML 必须在 configure 阶段就落到构建目录。
+# 测试目标 npp_tests 的 loadRealConfigs() 从 applicationDirPath() 读取它们；
+# 若只挂在 noda POST_BUILD，CI 只构建 npp_tests 时这两个文件就永远缺失，
+# 会让 8 个依赖真实配置的用例失败（本地构建过 noda 时会被偶然掩盖）。
+# configure_file(COPYONLY) 还会在上游 XML 变动时自动触发重新配置。
+configure_file("${POWEREDITOR_SRC}/langs.model.xml"
+               "${CMAKE_CURRENT_BINARY_DIR}/langs.model.xml" COPYONLY)
+configure_file("${POWEREDITOR_SRC}/stylers.model.xml"
+               "${CMAKE_CURRENT_BINARY_DIR}/stylers.model.xml" COPYONLY)
 
 target_link_libraries(noda PRIVATE
     ${QT_TARGETS}

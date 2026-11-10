@@ -30,4 +30,7 @@ private slots:
     void selectionCompareUsesSelectedTextOnly();
     void legacyConfigIsMigratedOnce();
     void vcsCompareActionsAreWired();
+    void compareViewStableAcrossEventLoop();
+    void repeatedRefreshWhileAsyncIsSafe();
+    void asyncCompareCloseDuringComputationIsSafe();
 };

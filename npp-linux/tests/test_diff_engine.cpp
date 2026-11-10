@@ -529,3 +529,93 @@ void TestDiffEngine::vcsCompareActionsAreWired()
     actSvn->trigger();
     QVERIFY(win.findChild<CompareWidget*>() == nullptr);
 }
+
+namespace {
+// 造两份「内容完全不同」的中等文本，稳定触发 >256KB 的异步比对路径。
+void fillLargeDifferingText(EditorView* a, EditorView* b, int lines) {
+    std::string textA;
+    std::string textB;
+    textA.reserve(static_cast<size_t>(lines) * 40);
+    textB.reserve(static_cast<size_t>(lines) * 40);
+    for (int i = 0; i < lines; ++i) {
+        textA += "A_" + std::to_string(i) + "_padding_padding_padding\n";
+        textB += "B_" + std::to_string(i) + "_padding_padding_padding\n";
+    }
+    a->setTextFromUtf8(textA);
+    b->setTextFromUtf8(textB);
+}
+} // namespace
+
+// 进入对比模式后持续跑事件循环：验证滚动同步/annotation/异步回调不会导致崩溃。
+void TestDiffEngine::compareViewStableAcrossEventLoop()
+{
+    MainWindow win;
+    win.show();
+    auto* tabMgr = win.findChild<TabManager*>();
+    QVERIFY(tabMgr != nullptr);
+    tabMgr->createNewTab();
+    auto* ed1 = tabMgr->editorAt(0);
+    auto* ed2 = tabMgr->editorAt(1);
+    QVERIFY(ed1 != nullptr && ed2 != nullptr);
+    ed1->setTextFromUtf8("head\nA1\nA2\nA3\ntail\n");
+    ed2->setTextFromUtf8("head\nB1\nINSERTED\nB2\nB3\ntail\n");
+
+    auto* actCompare = win.findChild<QAction*>("actCompare");
+    QVERIFY(actCompare != nullptr);
+    actCompare->trigger();
+    auto* cmp = win.findChild<CompareWidget*>();
+    QVERIFY(cmp != nullptr);
+
+    for (int i = 0; i < 60; ++i) {
+        QCoreApplication::processEvents();
+        QTest::qWait(5);
+    }
+    QVERIFY(cmp->totalDiffCount() > 0);
+    actCompare->trigger(); // 已处于对比模式时走 refreshDiff()
+    for (int i = 0; i < 20; ++i) {
+        QCoreApplication::processEvents();
+        QTest::qWait(5);
+    }
+    auto* actClear = win.findChild<QAction*>("actClearCompare");
+    QVERIFY(actClear != nullptr);
+    actClear->trigger();
+}
+
+// 异步计算在途时反复 refreshDiff / 切换选项，验证 generation 防护有效且不崩溃。
+void TestDiffEngine::repeatedRefreshWhileAsyncIsSafe()
+{
+    auto* edA = new EditorView();
+    auto* edB = new EditorView();
+    fillLargeDifferingText(edA, edB, 20000);
+    {
+        CompareWidget cmpWidget(edA, edB);
+        QVERIFY(cmpWidget.isComputing());
+        for (int i = 0; i < 8; ++i) {
+            cmpWidget.refreshDiff();
+            QCoreApplication::processEvents();
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(!cmpWidget.isComputing(), 15000);
+        QVERIFY(cmpWidget.totalDiffCount() > 0);
+        cmpWidget.clearDiff();
+    }
+    delete edA;
+    delete edB;
+}
+
+// 异步计算在途时直接销毁 CompareWidget（等价于用户立刻关闭对比）。
+void TestDiffEngine::asyncCompareCloseDuringComputationIsSafe()
+{
+    auto* edA = new EditorView();
+    auto* edB = new EditorView();
+    fillLargeDifferingText(edA, edB, 30000);
+    {
+        auto* cmpWidget = new CompareWidget(edA, edB);
+        QVERIFY(cmpWidget->isComputing());
+        delete cmpWidget; // 析构必须取消并等待在途任务
+        QCoreApplication::processEvents();
+        QTest::qWait(50);
+        QCoreApplication::processEvents();
+    }
+    delete edA;
+    delete edB;
+}
