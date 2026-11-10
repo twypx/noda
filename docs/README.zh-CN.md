@@ -20,8 +20,6 @@ Qt6 Widgets 重写。它不是 Wine 包装，也不是 Electron 应用。
 > **归属说明**：本项目是对 Notepad++ 源码的独立修改，按 GPL-3.0 发布。
 > 与 Notepad++ 及其作者不存在隶属、背书或关联关系。
 
-更详细的技术文档见 **[../npp-linux/README.md](../npp-linux/README.md)**。
-
 ## 相比 Notepad++ 的增强
 
 部分能力与上游重叠；这里强调的是它们在Noda里**开箱即用、零第三方依赖、并为 Linux 调优**，
@@ -106,11 +104,6 @@ sudo apt install ./build-deb/notepad-plus-plus-linux_*_amd64.deb
 | `PowerEditor/src/pugixml/` | 上游 vendored | 解析语言与样式 XML |
 | `PowerEditor/src/langs.model.xml`<br>`PowerEditor/src/stylers.model.xml` | 上游 vendored | 语言与主题定义，直接复用原版资产 |
 
-## 文档
-
-- 详细技术文档（中文）：**[../npp-linux/README.md](../npp-linux/README.md)**
-- 开发计划与模块记录：**[开发计划2.md](开发计划2.md)**
-- English README: **[../README.md](../README.md)**
 
 ## 许可
 

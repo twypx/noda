@@ -20,8 +20,6 @@ rewritten as a pure Qt6 Widgets application. It is **not** a Wine wrapper and **
 > **Attribution.** Noda is an independent modification of Notepad++ source code, released under
 > GPL-3.0. It is not affiliated with, endorsed by, or connected to Notepad++ or its author.
 
-The detailed, deep-dive technical documentation lives in
-**[npp-linux/README.md](npp-linux/README.md)**.
 
 ## What Noda adds over Notepad++
 
