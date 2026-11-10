@@ -20,4 +20,5 @@ private slots:
     void binaryFileOpensInHexView();
     void themeColorsFollowDarkMode();
     void monospaceFontSurvivesGlobalStyleSheet();
+    void scrollbarDragRepaintsViewport();
 };

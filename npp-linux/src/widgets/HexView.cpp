@@ -256,6 +256,15 @@ void HexView::resizeEvent(QResizeEvent* event) {
     viewport()->update();
 }
 
+void HexView::scrollContentsBy(int dx, int dy) {
+    Q_UNUSED(dx);
+    Q_UNUSED(dy);
+    // 本控件完全自绘（paintEvent 按 verticalScrollBar()->value() 计算起始行），
+    // 不能依赖基类的像素滚动：拖动滚动条只改 value，若不在这里重绘，视口内容不会更新。
+    // 滚轮路径由 Qt 另行刷新，所以此前表现为“滚轮能滚、拖条没反应”。
+    viewport()->update();
+}
+
 void HexView::changeEvent(QEvent* event) {
     QAbstractScrollArea::changeEvent(event);
     // 主题/界面字体变化会触发 FontChange：把等宽字号同步到实际字号，并重算字符宽度与行高，

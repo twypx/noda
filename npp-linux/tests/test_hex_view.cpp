@@ -4,7 +4,10 @@
 #include <QKeyEvent>
 #include <QTemporaryFile>
 #include <QApplication>
+#include <QCoreApplication>
 #include <QFontMetrics>
+#include <QPaintEvent>
+#include <QScrollBar>
 #include "utils/ThemeManager.h"
 #include "widgets/HexView.h"
 #include "MainWindow.h"
@@ -195,6 +198,42 @@ void TestHexView::binaryFileOpensInHexView() {
     QVERIFY(hv != nullptr);
     QCOMPARE(hv->dataSize(), static_cast<qint64>(raw.size()));
     QCOMPARE(hv->bytesInRange(0, raw.size()), raw);
+}
+
+namespace {
+
+// 记录重绘次数与重绘时的起始行，用于验证滚动条拖动确实会刷新视口。
+class CountingHexView : public HexView {
+public:
+    int paints{0};
+    int lastStartRow{-1};
+
+protected:
+    void paintEvent(QPaintEvent* event) override {
+        ++paints;
+        lastStartRow = static_cast<int>(verticalScrollBar()->value());
+        HexView::paintEvent(event);
+    }
+};
+
+} // namespace
+
+void TestHexView::scrollbarDragRepaintsViewport() {
+    CountingHexView hv;
+    hv.resize(480, 320);
+    hv.setData(QByteArray(16 * 2000, 'A'));
+    hv.show();
+    QCoreApplication::processEvents();
+
+    const int before = hv.paints;
+    // 模拟拖动/点击纵向滚动条：只改变 value，不经过滚轮事件。
+    hv.verticalScrollBar()->setValue(150);
+    QCoreApplication::processEvents();
+
+    QVERIFY2(hv.paints > before, "滚动条值变化必须触发视口重绘");
+    QCOMPARE(hv.lastStartRow, 150);
+
+    hv.hide();
 }
 
 // 主题色板随深/浅切换，且与 ThemeManager 提供的值一致。

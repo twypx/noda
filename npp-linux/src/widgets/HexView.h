@@ -64,6 +64,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void changeEvent(QEvent* event) override;
+    void scrollContentsBy(int dx, int dy) override;
 
 private:
     enum class Source { None, Memory, Mapped, File };
