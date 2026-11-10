@@ -200,6 +200,7 @@ private slots:
     void onMoveTabRight();
     void onShowDocSummary();
     void onToggleDarkMode(bool enabled);
+    void onToggleHexView(bool enabled);
 
     // 编码菜单
     void onSetEncoding(const QString& enc);
@@ -275,6 +276,7 @@ private:
 
     friend class TestMainWindow;
     friend class TestPreferencesDialog;
+    friend class TestHexView;
 
     // ---- 会话快照（session.xml + backup/）----
     // 「记住上次会话 + 周期性备份」：退出时不弹保存询问，
@@ -325,6 +327,7 @@ private:
     QAction* _actReadOnly{nullptr};
     QAction* _actDarkMode{nullptr};
     QAction* _actAbout{nullptr};
+    QAction* _actViewHex{nullptr};
 
     // 状态栏控件
     QLabel* _statusPosLabel{nullptr};

@@ -19,6 +19,8 @@
 #include "test_preferences_dialog.h"
 #include "test_typescript.h"
 #include "test_performance.h"
+#include "test_url_link.h"
+#include "test_hex_view.h"
 
 int main(int argc, char* argv[]) {
     // QSettings 的默认路径在 QCoreApplication 构造时确定，隔离必须在此之前。
@@ -65,6 +67,10 @@ int main(int argc, char* argv[]) {
     failures += QTest::qExec(&testTypeScript, argc, argv);
     TestPerformance testPerformance;
     failures += QTest::qExec(&testPerformance, argc, argv);
+    TestUrlLink testUrlLink;
+    failures += QTest::qExec(&testUrlLink, argc, argv);
+    TestHexView testHexView;
+    failures += QTest::qExec(&testHexView, argc, argv);
 
     return failures == 0 ? 0 : 1;
 }

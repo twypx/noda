@@ -15,6 +15,10 @@
 #include <QElapsedTimer>
 #include <QSet>
 #include <QTimer>
+#include <QMouseEvent>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QStringList>
 #include <algorithm>
 #include <vector>
 #include <cctype>
@@ -75,6 +79,8 @@ static inline int scRgb(int r, int g, int b) {
 // 8-12 已被「格式标记」占用，选中词高亮用 7、括号高亮用 6。
 static constexpr int kBraceHighlightIndicator = 6;
 static constexpr int kSmartHighlightIndicator = 7;
+// URL 可点击链接指示器（容器指示器，避开 6/7 高亮与 8-12 格式标记）。
+static constexpr int kUrlIndicator = 13;
 // 单次最多标记的匹配数，避免在超长文件里把整个文档都涂满。
 static constexpr int kMaxSmartHighlightMatches = 1000;
 // 选词高亮只覆盖「当前视口 ±N 行」：屏幕之外的数 MB 内容涂了也看不见。
@@ -82,6 +88,199 @@ static constexpr int kMaxSmartHighlightMatches = 1000;
 static constexpr sptr_t kHighlightContextLines = 200;
 // 单次重算的时间预算，超时立即熔断，绝不让选词拖住 UI 线程。
 static constexpr qint64 kHighlightBudgetMs = 5;
+
+// ---------------- URL 识别（移植自 Notepad++ 的 isUrl 系列，去掉 Win32 InternetCrackUrl） ----------------
+// 全部基于 QString/QChar 操作，scheme 一旦确认即视为有效链接，边界处理与原版保持一致。
+namespace {
+
+bool isUrlSchemeStartChar(QChar c) {
+    return c.isUpper() || c.isLower();
+}
+
+// scheme 之前允许出现的分隔符（非字母、非数字、非下划线）。
+bool isUrlSchemeDelimiter(QChar c) {
+    return !(c.isDigit() || c.isUpper() || c.isLower() || c == '_');
+}
+
+// URL 普通文本字符：排除空白（含 Unicode 空白）、以及若干在查询/结构里具有特殊含义的符号。
+bool isUrlTextChar(QChar c) {
+    if (c.isNull() || c.unicode() <= ' ') return false;
+    switch (c.unicode()) {
+        case 0x00A0: case 0x2002: case 0x2003: case 0x3000: case 0x2004:
+        case 0x2005: case 0x2006: case 0x2007: case 0x2008: case 0x2009:
+        case 0x200A: case 0x200B: case 0x202F: case 0x205F: case 0xFEFF:
+            return false;
+    }
+    switch (c.unicode()) {
+        case '"': case '#': case '<': case '>': case '{': case '}':
+        case '?': case 0x007F:
+            return false;
+    }
+    return true;
+}
+
+bool isUrlQueryDelimiter(QChar c) {
+    return c == '&' || c == '+' || c == '=' || c == ';';
+}
+
+bool isUrlSchemeSupported(const QString& url, int remainingLength) {
+    static const QStringList schemes = {
+        QStringLiteral("ftp://"), QStringLiteral("http://"), QStringLiteral("https://"),
+        QStringLiteral("mailto:"), QStringLiteral("file://")};
+    for (const QString& s : schemes) {
+        if (s.length() <= remainingLength && url.startsWith(s, Qt::CaseInsensitive))
+            return true;
+    }
+    return false;
+}
+
+// 在 text[start..] 寻找 URL 起点；找到时 distance=起点偏移、schemeLength=scheme 长度。
+bool scanToUrlStart(const QString& text, int textLen, int start, int* distance, int* schemeLength) {
+    int p = start;
+    int p0 = 0;
+    enum { sUnknown, sScheme } st = sUnknown;
+    while (p < textLen) {
+        const QChar ch = text.at(p);
+        if (st == sUnknown) {
+            if (isUrlSchemeStartChar(ch) && (p == 0 || isUrlSchemeDelimiter(text.at(p - 1)))) {
+                p0 = p;
+                st = sScheme;
+            }
+        } else { // sScheme
+            if (ch == ':' && isUrlSchemeSupported(text.mid(p0), textLen - p0)) {
+                *distance = p0 - start;
+                *schemeLength = p - p0 + 1;
+                return true;
+            }
+            if (!isUrlSchemeStartChar(ch)) st = sUnknown;
+        }
+        ++p;
+    }
+    *schemeLength = 0;
+    *distance = p - start;
+    return false;
+}
+
+// 从 URL 主体起点（跳过 scheme）扫描到 URL 末尾，distance=主体+尾部的长度。
+void scanToUrlEnd(const QString& text, int textLen, int start, int* distance) {
+    int p = start;
+    QChar q;
+    enum { sHostAndPath, sQuery, sQueryAfterDelimiter, sQueryQuotes, sQueryAfterQuotes, sFragment } st = sHostAndPath;
+    while (p < textLen) {
+        const QChar ch = text.at(p);
+        switch (st) {
+            case sHostAndPath:
+                if (ch == '?') st = sQuery;
+                else if (ch == '#') st = sFragment;
+                else if (!isUrlTextChar(ch)) { *distance = p - start; return; }
+                break;
+            case sQuery:
+                if (ch == '#') st = sFragment;
+                else if (isUrlQueryDelimiter(ch)) st = sQueryAfterDelimiter;
+                else if (!isUrlTextChar(ch)) { *distance = p - start; return; }
+                break;
+            case sQueryAfterDelimiter:
+                if (ch == '\'' || ch == '"' || ch == '`') { q = ch; st = sQueryQuotes; }
+                else if (ch == '(') { q = ')'; st = sQueryQuotes; }
+                else if (ch == '[') { q = ']'; st = sQueryQuotes; }
+                else if (ch == '{') { q = '}'; st = sQueryQuotes; }
+                else if (isUrlTextChar(ch)) st = sQuery;
+                else { *distance = p - start; return; }
+                break;
+            case sQueryQuotes:
+                if (ch < ' ') { *distance = p - start; return; }
+                if (ch == q) st = sQueryAfterQuotes;
+                break;
+            case sQueryAfterQuotes:
+                if (isUrlQueryDelimiter(ch)) st = sQueryAfterDelimiter;
+                else { *distance = p - start; return; }
+                break;
+            case sFragment:
+                if (ch != '?' && !isUrlTextChar(ch)) { *distance = p - start; return; }
+                break;
+        }
+        ++p;
+    }
+    *distance = p - start;
+}
+
+void removeUnwantedTrailingCharFromEnclosedUrl(int start, const QString& text, int* length) {
+    if (start > 0 && text.at(start - 1) == '\'' && text.at(start + *length - 1) == '\'') *length -= 1;
+    if (start > 0 && text.at(start - 1) == '`' && text.at(start + *length - 1) == '`') *length -= 1;
+}
+
+bool removeUnwantedTrailingCharFromUrl(const QString& text, int* length) {
+    int l = *length - 1;
+    if (l <= 0) return false;
+    static const QString singleChars = QStringLiteral(".,:;?!#");
+    for (const QChar sc : singleChars) {
+        if (text.at(l) == sc) { *length = l; return true; }
+    }
+    static const QString closing = QStringLiteral(")]");
+    static const QString opening = QStringLiteral("([");
+    for (int i = 0; i < closing.length(); ++i) {
+        if (text.at(l) == closing.at(i)) {
+            int count = 0;
+            for (int j = l - 1; j >= 0; --j) {
+                if (text.at(j) == closing.at(i)) count++;
+                if (text.at(j) == opening.at(i)) {
+                    if (count > 0) count--;
+                    else return false;
+                }
+            }
+            if (count != 0) return false;
+            *length = l;
+            return true;
+        }
+    }
+    return false;
+}
+
+// text[start..] 是否以合法 URL 开头；成功时 segmentLen=URL 长度，否则为到下一候选的偏移。
+bool isUrl(const QString& text, int textLen, int start, int* segmentLen) {
+    int dist = 0, schemeLen = 0;
+    if (scanToUrlStart(text, textLen, start, &dist, &schemeLen)) {
+        if (dist) {
+            *segmentLen = dist;
+            return false;
+        }
+        int len = 0;
+        scanToUrlEnd(text, textLen, start + schemeLen, &len);
+        if (len) {
+            len += schemeLen;
+            // 原版用 Win32 InternetCrackUrl 校验；本移植版改为结构校验（scheme 已确认即视为有效）。
+            removeUnwantedTrailingCharFromEnclosedUrl(start, text, &len);
+            while (removeUnwantedTrailingCharFromUrl(text.mid(start), &len)) {}
+            *segmentLen = len;
+            return true;
+        }
+        len = 1;
+        const int lMax = textLen - start;
+        while (isUrlSchemeStartChar(text.at(start + len)) && len < lMax) len++;
+        *segmentLen = len;
+        return false;
+    }
+    *segmentLen = dist;
+    return false;
+}
+
+// 返回 text 中所有 URL 的 [起始, 长度]（以 QString 字符索引计）。
+QVector<QPair<int, int>> findUrls(const QString& text) {
+    QVector<QPair<int, int>> out;
+    const int textLen = text.length();
+    int start = 0;
+    while (start < textLen) {
+        int segLen = 0;
+        const bool r = isUrl(text, textLen, start, &segLen);
+        if (segLen <= 0) break;
+        if (r) out.append({start, segLen});
+        start += segLen;
+        if (start >= textLen) break;
+    }
+    return out;
+}
+
+} // namespace
 
 void EditorView::setupMarkdownStyles(bool isDark) {
     int fs = (_fontSize > 0) ? _fontSize : 10;
@@ -312,6 +511,15 @@ void EditorView::initEditorDefaults() {
     };
     configureIndicator(kBraceHighlightIndicator, 120, 82, 238);
     configureIndicator(kSmartHighlightIndicator, 255, 165, 0);
+
+    // URL 可点击链接指示器：INDIC_PLAIN 画下划线；VALUEFORE 标志让指示器值作为链接文字色；
+    // 悬停改用 EXPLORERLINK 并高亮前景，体验与原版一致。
+    send(SCI_INDICSETSTYLE, kUrlIndicator, INDIC_PLAIN);
+    send(SCI_INDICSETFORE, kUrlIndicator, scRgb(0, 0, 255));       // 链接蓝
+    send(SCI_INDICSETALPHA, kUrlIndicator, 70);
+    send(SCI_INDICSETFLAGS, kUrlIndicator, SC_INDICFLAG_VALUEFORE);
+    send(SCI_INDICSETHOVERSTYLE, kUrlIndicator, INDIC_EXPLORERLINK);
+    send(SCI_INDICSETHOVERFORE, kUrlIndicator, scRgb(0, 0, 255));
 
     // 用指示器绘制匹配括号，避免 STYLE_BRACELIGHT 在深色主题下不可见。
     send(SCI_BRACEHIGHLIGHTINDICATOR, 1, kBraceHighlightIndicator);
@@ -544,6 +752,20 @@ void EditorView::applyFormattedText(const std::string& formattedUtf8) {
     send(SCI_SETFIRSTVISIBLELINE, static_cast<uptr_t>(newFirstLine));
 
     updateLineNumberMarginWidth();
+}
+
+QByteArray EditorView::documentBytes() const {
+    const sptr_t len = const_cast<EditorView*>(this)->send(SCI_GETLENGTH);
+    if (len <= 0) return QByteArray();
+    const char* ptr = reinterpret_cast<const char*>(
+        const_cast<EditorView*>(this)->send(SCI_GETRANGEPOINTER, 0, len));
+    if (ptr) {
+        return QByteArray(ptr, static_cast<int>(len));
+    }
+    QByteArray buf;
+    buf.resize(static_cast<int>(len));
+    const_cast<EditorView*>(this)->sends(SCI_GETTEXT, len + 1, buf.data());
+    return buf;
 }
 
 bool EditorView::writeEncodedFile(const QString& path, const std::string& utf8,
@@ -1218,6 +1440,15 @@ void EditorView::onUpdateUi(Scintilla::Update updated) {
         && (updatedBits & (static_cast<int>(Scintilla::Update::VScroll)
                          | static_cast<int>(Scintilla::Update::HScroll)))) {
         _hlTimer->start();
+    }
+
+    // URL 可点击链接：内容变更 / 选区 / 滚动后刷新可见区域内的 URL 下划线。
+    // 只扫可见区域，代价极小，无需防抖。
+    if (updatedBits & (static_cast<int>(Scintilla::Update::Content)
+                     | static_cast<int>(Scintilla::Update::Selection)
+                     | static_cast<int>(Scintilla::Update::VScroll)
+                     | static_cast<int>(Scintilla::Update::HScroll))) {
+        updateUrlHighlighting();
     }
 }
 
@@ -2134,6 +2365,104 @@ void EditorView::clearMarks() {
         send(SCI_SETINDICATORCURRENT, k);
         send(SCI_INDICATORCLEARRANGE, 0, len);
     }
+}
+
+// ---------------- URL 可点击链接 ----------------
+
+QString EditorView::textInRange(sptr_t a, sptr_t b) const {
+    if (b <= a) return QString();
+    QByteArray buf(static_cast<int>(b - a + 1), 0);
+    Sci_TextRangeFull tr{};
+    tr.chrg.cpMin = static_cast<Sci_Position>(a);
+    tr.chrg.cpMax = static_cast<Sci_Position>(b);
+    tr.lpstrText = buf.data();
+    const_cast<EditorView*>(this)->send(SCI_GETTEXTRANGEFULL, 0,
+                                        reinterpret_cast<sptr_t>(&tr));
+    return QString::fromUtf8(buf.constData(), static_cast<int>(b - a));
+}
+
+void EditorView::updateUrlHighlighting() {
+    const sptr_t length = send(SCI_GETLENGTH);
+
+    // 可见区域优先：只扫描视口内的文本，避免大文件全文档扫描（对齐高性能原则）。
+    // 未布局（如离屏测试）时退化为全文档扫描，保证测试确定性。
+    sptr_t vStart = 0, vEnd = length;
+    const sptr_t firstVisible = send(SCI_GETFIRSTVISIBLELINE);
+    const sptr_t linesOnScreen = qMax<sptr_t>(1, send(SCI_LINESONSCREEN));
+    if (firstVisible >= 0) {
+        const sptr_t topLine = send(SCI_DOCLINEFROMVISIBLE, firstVisible);
+        const sptr_t bottomLine = send(SCI_DOCLINEFROMVISIBLE, firstVisible + linesOnScreen);
+        vStart = send(SCI_POSITIONFROMLINE, topLine);
+        vEnd = send(SCI_GETLINEENDPOSITION, bottomLine);
+    }
+    if (vEnd <= vStart) {
+        vStart = 0;
+        vEnd = length;
+    }
+
+    send(SCI_SETINDICATORCURRENT, kUrlIndicator);
+    send(SCI_INDICATORCLEARRANGE, vStart, vEnd - vStart);
+
+    if (!_urlClickable) return;
+
+    const QString text = textInRange(vStart, vEnd);
+    const auto ranges = findUrls(text);
+    for (const auto& r : ranges) {
+        const sptr_t bStart = send(SCI_POSITIONRELATIVE, vStart, r.first);
+        const sptr_t bEnd = send(SCI_POSITIONRELATIVE, vStart, r.first + r.second);
+        if (bEnd > bStart) {
+            send(SCI_SETINDICATORCURRENT, kUrlIndicator);
+            send(SCI_INDICATORFILLRANGE, bStart, bEnd - bStart);
+        }
+    }
+}
+
+void EditorView::setUrlClickable(bool enabled) {
+    if (_urlClickable == enabled) return;
+    _urlClickable = enabled;
+    updateUrlHighlighting();
+}
+
+void EditorView::refreshUrlHighlighting() {
+    updateUrlHighlighting();
+}
+
+QString EditorView::urlTextAt(sptr_t pos) const {
+    const int mask = static_cast<int>(send(SCI_INDICATORALLONFOR, pos));
+    if (!(mask & (1 << kUrlIndicator))) return QString();
+    const sptr_t s = send(SCI_INDICATORSTART, kUrlIndicator, pos);
+    const sptr_t e = send(SCI_INDICATOREND, kUrlIndicator, pos);
+    return const_cast<EditorView*>(this)->textInRange(s, e);
+}
+
+bool EditorView::openUrlAt(sptr_t pos) {
+    const QString url = urlTextAt(pos);
+    if (url.isEmpty()) return false;
+    QUrl q(url);
+    if (!q.isValid() || q.scheme().isEmpty())
+        q = QUrl::fromUserInput(url);
+    static const QStringList allowed = {
+        QStringLiteral("http"), QStringLiteral("https"),
+        QStringLiteral("ftp"), QStringLiteral("file"), QStringLiteral("mailto")};
+    if (q.isValid() && allowed.contains(q.scheme().toLower())) {
+        QDesktopServices::openUrl(q);
+        return true;
+    }
+    return false;
+}
+
+void EditorView::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton
+        && (event->modifiers() & Qt::ControlModifier)) {
+        const sptr_t pos = send(SCI_CHARPOSITIONFROMPOINT,
+                                static_cast<uptr_t>(event->x()),
+                                static_cast<sptr_t>(event->y()));
+        if (openUrlAt(pos)) {
+            event->accept();
+            return;
+        }
+    }
+    ScintillaEditBase::mousePressEvent(event);
 }
 
 void EditorView::copyBookmarkedLines() {

@@ -598,6 +598,14 @@ QWidget* PreferencesDialog::createPageHighlight(const AppPreferences& current) {
     braceLayout->addWidget(_hlMatchingBracesCheck);
 
     layout->addWidget(braceGroup);
+
+    auto* urlGroup = new QGroupBox(tr("URL 可点击链接"), page);
+    auto* urlLayout = new QVBoxLayout(urlGroup);
+    _urlClickableCheck = new QCheckBox(tr("自动识别 URL 并加下划线，按住 Ctrl 点击打开"), urlGroup);
+    _urlClickableCheck->setChecked(current.urlClickable);
+    urlLayout->addWidget(_urlClickableCheck);
+    layout->addWidget(urlGroup);
+
     layout->addStretch();
     return page;
 }
@@ -707,6 +715,7 @@ void PreferencesDialog::onAccept() {
     if (_hlMatchCaseCheck) _prefs.highlightMatchCase = _hlMatchCaseCheck->isChecked();
     if (_hlMatchWholeWordCheck) _prefs.highlightMatchWholeWord = _hlMatchWholeWordCheck->isChecked();
     if (_hlMatchingBracesCheck) _prefs.highlightMatchingBraces = _hlMatchingBracesCheck->isChecked();
+    if (_urlClickableCheck) _prefs.urlClickable = _urlClickableCheck->isChecked();
 
     if (_rememberSessionCheck) _prefs.rememberSession = _rememberSessionCheck->isChecked();
     if (_snapshotBackupCheck) _prefs.snapshotBackup = _snapshotBackupCheck->isChecked();

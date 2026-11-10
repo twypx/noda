@@ -152,6 +152,9 @@ MainWindow::MainWindow(QWidget* parent)
     loadRecentFiles();
 
     connect(_tabManager, &TabManager::activeEditorChanged, this, &MainWindow::onActiveEditorChanged);
+    connect(_tabManager, &TabManager::hexViewToggled, this, [this](bool active) {
+        if (_actViewHex) _actViewHex->setChecked(active);
+    });
     // 上游 quitOnEmpty：延迟到事件循环再 close()，避免在 closeTab 的析构路径里销毁窗口。
     connect(_tabManager, &TabManager::quitOnEmptyRequested, this, [this]() {
         QTimer::singleShot(0, this, &QWidget::close);
@@ -521,6 +524,12 @@ void MainWindow::setupViewMenu() {
     menu->addSeparator();
     menu->addAction("摘要信息 / 统计信息...", this, &MainWindow::onShowDocSummary);
 
+    menu->addSeparator();
+    _actViewHex = menu->addAction(tr("以十六进制查看(&H)"), this, &MainWindow::onToggleHexView);
+    _actViewHex->setObjectName("actViewHex");
+    _actViewHex->setCheckable(true);
+    _actViewHex->setShortcut(QKeySequence(tr("Ctrl+Alt+H")));
+
     _actDarkMode = menu->addAction("深色模式", this, &MainWindow::onToggleDarkMode);
     _actDarkMode->setCheckable(true);
 }
@@ -696,6 +705,7 @@ void MainWindow::setupToolBar() {
     addToggleTool("wrap-text", QStringLiteral("自动换行"), _actWrap, &MainWindow::onToggleWordWrap);
     addToggleTool("pilcrow", QStringLiteral("显示所有字符"), _actShowAll, &MainWindow::onToggleShowAllChars);
     addToggleTool("indent-guide", QStringLiteral("显示缩进参考线"), _actShowGuides, &MainWindow::onToggleShowIndentGuides);
+    addToggleTool("binary", QStringLiteral("以十六进制查看"), _actViewHex, &MainWindow::onToggleHexView);
 
     refreshToolBarIcons();
 }
@@ -827,6 +837,10 @@ void MainWindow::openFile(const QString& filePath) {
         addRecentFile(filePath);
         updateStatusBar(ed);
         updateLanguageUI(QString::fromStdString(ed->currentLanguage()));
+        // 含 NUL 字节的二进制文件在文本视图里只会显示乱码：直接切到十六进制查看。
+        if (ed->buffer()->isBinary() && _actViewHex && !_actViewHex->isChecked()) {
+            _actViewHex->trigger();
+        }
     }
 }
 
@@ -1668,11 +1682,16 @@ void MainWindow::onShowDocSummary() {
     dlg.exec();
 }
 
+void MainWindow::onToggleHexView(bool enabled) {
+    _tabManager->toggleHexView(enabled);
+}
+
 void MainWindow::onToggleDarkMode(bool enabled) {
     _isDarkMode = enabled;
     _prefs.darkMode = enabled;
     applyDarkModePalette(enabled);
     refreshToolBarIcons(); // 图标前景色分深/浅两套，必须随主题重建
+    _tabManager->setDarkMode(enabled);
     for (int i = 0; i < _tabManager->count(); ++i) {
         if (auto* ed = _tabManager->editorAt(i)) {
             ed->setDarkMode(enabled);
@@ -1963,6 +1982,7 @@ void MainWindow::applyPreferences(const AppPreferences& prefs, bool force) {
         || old.highlightMatchingBraces != prefs.highlightMatchingBraces
         || old.highlightMatchCase != prefs.highlightMatchCase
         || old.highlightMatchWholeWord != prefs.highlightMatchWholeWord
+        || old.urlClickable != prefs.urlClickable
         || old.autoCompletion != prefs.autoCompletion
         || old.autoCompletionMinChars != prefs.autoCompletionMinChars
         || old.autoCompletionType != prefs.autoCompletionType
@@ -2013,6 +2033,7 @@ void MainWindow::applyPreferencesToEditor(EditorView* ed) {
     ed->setDarkMode(_prefs.darkMode);
     ed->setHighlightPrefs(_prefs.highlightMatchingWords, _prefs.highlightMatchingBraces,
                           _prefs.highlightMatchCase, _prefs.highlightMatchWholeWord);
+    ed->setUrlClickable(_prefs.urlClickable);
     ed->setAutoCompletion(_prefs.autoCompletion, _prefs.autoCompletionMinChars,
                           _prefs.autoCompletionType, _prefs.autoCompletionIgnoreNumbers);
 }
@@ -2064,6 +2085,7 @@ void MainWindow::loadPreferences() {
     _prefs.highlightMatchingBraces = s.value("prefs/highlightMatchingBraces", true).toBool();
     _prefs.highlightMatchCase = s.value("prefs/highlightMatchCase", true).toBool();
     _prefs.highlightMatchWholeWord = s.value("prefs/highlightMatchWholeWord", false).toBool();
+    _prefs.urlClickable = s.value("prefs/urlClickable", true).toBool();
 
     _prefs.rememberSession = s.value("prefs/rememberSession", true).toBool();
     _prefs.snapshotBackup = s.value("prefs/snapshotBackup", true).toBool();
@@ -2117,6 +2139,7 @@ void MainWindow::savePreferences() {
     s.setValue("prefs/highlightMatchingBraces", _prefs.highlightMatchingBraces);
     s.setValue("prefs/highlightMatchCase", _prefs.highlightMatchCase);
     s.setValue("prefs/highlightMatchWholeWord", _prefs.highlightMatchWholeWord);
+    s.setValue("prefs/urlClickable", _prefs.urlClickable);
 
     s.setValue("prefs/rememberSession", _prefs.rememberSession);
     s.setValue("prefs/snapshotBackup", _prefs.snapshotBackup);
@@ -2325,6 +2348,7 @@ void MainWindow::onActiveEditorChanged(EditorView* editor) {
         });
 
         if (_actReadOnly) _actReadOnly->setChecked(editor->isReadOnly());
+        if (_actViewHex) _actViewHex->setChecked(_tabManager->isHexViewActive());
         updateStatusBar(editor);
         updateLanguageUI(QString::fromStdString(editor->currentLanguage()));
         updateEncodingUI(QString::fromStdString(editor->buffer()->getEncoding()));

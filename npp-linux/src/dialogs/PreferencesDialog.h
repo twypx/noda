@@ -75,6 +75,9 @@ struct AppPreferences {
     bool highlightMatchCase{true};           // 区分大小写
     bool highlightMatchWholeWord{false};     // 全词匹配
 
+    // 2. 编辑器 -> 高亮匹配（URL 可点击链接）
+    bool urlClickable{true};                // 自动识别 URL 并加下划线，Ctrl+点击打开
+
     // 3. 会话与备份
     bool rememberSession{true};              // 记住上次会话
     bool snapshotBackup{true};               // 启用会话快照与周期性备份
@@ -165,6 +168,7 @@ private:
     QCheckBox* _hlMatchingBracesCheck{nullptr};
     QCheckBox* _hlMatchCaseCheck{nullptr};
     QCheckBox* _hlMatchWholeWordCheck{nullptr};
+    QCheckBox* _urlClickableCheck{nullptr};
 
     // 会话与备份
     QCheckBox* _rememberSessionCheck{nullptr};

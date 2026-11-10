@@ -7,6 +7,8 @@
 #include <QPair>
 #include <QString>
 
+class QMouseEvent;
+
 class QTimer;
 
 struct DocSummary {
@@ -68,6 +70,8 @@ public:
     void setEditorFont(const QString& fontName, int fontSize);
     QString getEditorFontName() const { return _fontName; }
     int getEditorFontSize() const { return _fontSize; }
+
+    QByteArray documentBytes() const;
 
     // 查找替换核心方法
     bool findNext(const QString& text, bool matchCase, bool wholeWord, bool regex);
@@ -156,6 +160,14 @@ public:
     void markSelectedText(int styleIndex); // 1~5
     void clearMarks();
 
+    // URL 可点击链接（移植自 Notepad++ 的 Clickable Link）：
+    // 自动识别可见文本里的 URL 并加下划线，按住 Ctrl 点击即在其默认程序（浏览器/邮件客户端）打开。
+    void setUrlClickable(bool enabled);
+    void refreshUrlHighlighting();   // 立即重算（首选项变更 / 测试用）
+    bool openUrlAt(sptr_t pos);      // 命中 URL 则打开并返回 true（Ctrl+点击与测试共用）
+    QString urlTextAt(sptr_t pos) const; // 返回 pos 命中的 URL 文本，未命中返回空
+    static constexpr int urlIndicatorId() { return 13; } // 供测试与跨模块引用
+
     // 书签操作
     void toggleBookmark();
     void nextBookmark();
@@ -205,6 +217,9 @@ signals:
     void lineEndingChanged(LineEnding le);
     void languageChanged(const QString& langId);
 
+protected:
+    void mousePressEvent(QMouseEvent* event) override;
+
 private slots:
     void onUpdateUi(Scintilla::Update updated);
 
@@ -242,6 +257,8 @@ private:
     void updateSmartHighlight();
     void updateBraceHighlight();
     void updateAutoCompletion(int ch);
+    void updateUrlHighlighting();                 // 扫描可见区域并填充/清除 URL 指示器
+    QString textInRange(sptr_t a, sptr_t b) const; // 读取 [a,b) 区间的 UTF-8 文本为 QString
 
     std::shared_ptr<DocumentBuffer> _buffer;
     QString _lastSaveError;
@@ -266,6 +283,9 @@ private:
     // 上一次实际标记过的字节窗口。视口仍落在其中时可跳过重算；滚出缓冲带才重新扫描。
     sptr_t _hlMarkedStart{0};
     sptr_t _hlMarkedEnd{0};
+
+    // URL 可点击链接：开关与可见区域扫描所需的私有实现。
+    bool _urlClickable{true};
 
     bool _autoCompletion{true};
     int _autoCompletionMinChars{2};

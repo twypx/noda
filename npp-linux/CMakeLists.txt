@@ -150,6 +150,7 @@ set(APP_SOURCES
     src/utils/EncodingConverter.cpp
     src/widgets/TitleBar.cpp
     src/widgets/FolderTreePane.cpp
+    src/widgets/HexView.cpp
     src/dialogs/FindReplaceDialog.cpp
     src/dialogs/GoToLineDialog.cpp
     src/dialogs/ColumnEditorDialog.cpp

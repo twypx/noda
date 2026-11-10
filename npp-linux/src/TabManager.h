@@ -2,9 +2,11 @@
 
 #include <QTabWidget>
 #include <QStringList>
+#include <QMap>
 #include "EditorView.h"
 
 class QMouseEvent;
+class HexView;
 
 class TabManager : public QTabWidget {
     Q_OBJECT
@@ -63,6 +65,13 @@ public:
     void setQuitOnEmpty(bool on) { _quitOnEmpty = on; }
     bool quitOnEmpty() const { return _quitOnEmpty; }
 
+    // 十六进制查看器支持
+    HexView* currentHexView() const;
+    HexView* hexViewAt(int index) const;
+    bool isHexViewActive() const;
+    void toggleHexView(bool enable);
+    void setDarkMode(bool dark);
+
     // 首选项一次会改多个标签栏动态属性，包在批量区间里只做一次 unpolish/polish。
     void beginStyleBatch();
     void endStyleBatch();
@@ -71,6 +80,7 @@ public:
 
 signals:
     void activeEditorChanged(EditorView* editor);
+    void hexViewToggled(bool active);
     void editorCreated(EditorView* editor);
     // 标签即将被销毁：会话快照的备份文件要在这时删掉，否则会变成无人引用的孤儿文件。
     void editorClosing(EditorView* editor);
@@ -85,6 +95,7 @@ signals:
     void quitOnEmptyRequested();
 
 protected:
+    void resizeEvent(QResizeEvent* event) override;
     // 双击标签栏右侧的空白区（标签栏只占标签那一段宽度，右边空白落在 QTabWidget 上）。
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     // 拦截标签栏的 QEvent::ContextMenu：右键先选中被点的标签，再请求弹出菜单。
@@ -99,6 +110,8 @@ private:
 
     int _newDocCounter{1};
     QStringList _closedFilesStack;
+    mutable QMap<EditorView*, HexView*> _hexViews;
+    bool _isDarkMode{false};
     int _styleBatchDepth{0};
     bool _styleBatchDirty{false};
     int _styleRepolishCount{0};

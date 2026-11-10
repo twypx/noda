@@ -81,6 +81,26 @@ FolderTreeColors ThemeManager::folderTreeColors() {
     return s_darkTheme ? dark : light;
 }
 
+HexViewColors ThemeManager::hexViewColors(bool isDark) {
+    // 与 QSS / QPalette 的 Obsidian token 对齐：深色 Base #1C1C1C、文本 #dadada；
+    // 光标色沿用经典十六进制编辑器的蓝，深浅各一套，保证可读性。
+    static const HexViewColors dark{
+        QColor(0x1C, 0x1C, 0x1C), // background
+        QColor(0xB3, 0xB3, 0xB3), // address
+        QColor(0xDA, 0xDA, 0xDA), // text
+        QColor(0x33, 0x33, 0x33), // separator
+        QColor(0x26, 0x4F, 0x78), // cursorHex
+        QColor(0x3A, 0x3D, 0x41)};// cursorAscii
+    static const HexViewColors light{
+        QColor(0xFF, 0xFF, 0xFF), // background
+        QColor(0x6E, 0x6E, 0x6E), // address
+        QColor(0x22, 0x22, 0x22), // text
+        QColor(0xE4, 0xE4, 0xE4), // separator
+        QColor(0xB2, 0xD7, 0xFE), // cursorHex
+        QColor(0xD0, 0xE2, 0xF2)};// cursorAscii
+    return isDark ? dark : light;
+}
+
 void ThemeManager::setUiFont(const QFont& font, const QStringList& families) {
     s_uiFont = font;
     s_uiFontSet = true;

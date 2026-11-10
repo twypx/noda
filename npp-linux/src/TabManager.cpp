@@ -1,4 +1,5 @@
 #include "TabManager.h"
+#include "widgets/HexView.h"
 #include <QContextMenuEvent>
 #include <QEvent>
 #include <QMessageBox>
@@ -222,6 +223,11 @@ bool TabManager::closeTab(int index) {
 
     emit editorClosing(ed);
     removeTab(index);
+    auto hexIt = _hexViews.find(ed);
+    if (hexIt != _hexViews.end()) {
+        delete hexIt.value();
+        _hexViews.erase(hexIt);
+    }
     delete ed;
 
     if (count() == 0) {
@@ -354,7 +360,9 @@ void TabManager::onTabCloseRequested(int index) {
 }
 
 void TabManager::onCurrentChanged(int index) {
-    emit activeEditorChanged(editorAt(index));
+    auto* ed = editorAt(index);
+    emit activeEditorChanged(ed);
+    emit hexViewToggled(isHexViewActive());
 }
 
 void TabManager::setTabReduce(bool reduce) {
@@ -400,4 +408,81 @@ void TabManager::setCompactLabelLength(int length) {
     if (_compactLabelLength == clamped) return;
     _compactLabelLength = clamped;
     for (int i = 0; i < count(); ++i) updateTabTitle(i);
+}
+
+void TabManager::resizeEvent(QResizeEvent* event) {
+    QTabWidget::resizeEvent(event);
+    auto* ed = currentEditor();
+    if (ed) {
+        auto it = _hexViews.find(ed);
+        if (it != _hexViews.end() && it.value() && it.value()->isVisible()) {
+            it.value()->setGeometry(ed->rect());
+        }
+    }
+}
+
+HexView* TabManager::currentHexView() const {
+    auto* ed = currentEditor();
+    if (!ed) return nullptr;
+    auto it = _hexViews.find(ed);
+    if (it != _hexViews.end()) {
+        return it.value();
+    }
+    auto* hex = new HexView(ed);
+    hex->setDarkMode(_isDarkMode);
+    hex->hide();
+    _hexViews.insert(ed, hex);
+    return hex;
+}
+
+HexView* TabManager::hexViewAt(int index) const {
+    auto* ed = editorAt(index);
+    if (!ed) return nullptr;
+    auto it = _hexViews.find(ed);
+    if (it != _hexViews.end()) {
+        return it.value();
+    }
+    auto* hex = new HexView(ed);
+    hex->setDarkMode(_isDarkMode);
+    hex->hide();
+    _hexViews.insert(ed, hex);
+    return hex;
+}
+
+bool TabManager::isHexViewActive() const {
+    auto* ed = currentEditor();
+    if (!ed) return false;
+    auto it = _hexViews.find(ed);
+    return (it != _hexViews.end() && it.value() && it.value()->isVisible());
+}
+
+void TabManager::toggleHexView(bool enable) {
+    auto* ed = currentEditor();
+    if (!ed) return;
+    auto* hex = currentHexView();
+    if (!hex) return;
+
+    if (enable) {
+        // 已保存文件直接映射磁盘原始字节（保真且零整份拷贝）；
+        // 未保存的新文档回退为内存缓冲。十六进制视图反映的是磁盘内容，
+        // 未保存的编辑需先保存后才体现在十六进制视图中。
+        const QString path = QString::fromStdString(ed->buffer()->getFilePath());
+        if (path.isEmpty() || !hex->setFile(path)) {
+            hex->setData(ed->documentBytes());
+        }
+        hex->setGeometry(ed->rect());
+        hex->show();
+        hex->setFocus();
+    } else {
+        hex->hide();
+        ed->setFocus();
+    }
+    emit hexViewToggled(enable);
+}
+
+void TabManager::setDarkMode(bool dark) {
+    _isDarkMode = dark;
+    for (auto* hex : _hexViews) {
+        if (hex) hex->setDarkMode(dark);
+    }
 }
