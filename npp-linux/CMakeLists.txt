@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(NotepadPlusPlus_Linux
-    VERSION 1.0.11
+    VERSION 1.0.12
     LANGUAGES CXX C)
 
 add_compile_definitions(NPP_VERSION_STRING="${PROJECT_VERSION}")
