@@ -103,6 +103,8 @@ v1.0.7 / v1.0.8 已提交：拖拽文件到窗口打开、透明抠图图标重�
 
 模块 P（文件比对，尚未提交）：原实现存在 O(D²) 内存、抢占 TabManager 页面、行内差异只算前后缀等问题；已整改为 Histogram 锚点 + 有界 Myers、字符级行内 diff、`currentTextView()` 零拷贝、独立只读副本比对、16MB 护栏，并新增忽略空白/大小写选项。详见 `docs/开发计划2.md` 模块 P.6。
 
+模块 P.7-DROP（工具栏下拉 + 选择文件比对，尚未提交）：先调研上游 `BTNS_DROPDOWN` / `TBN_DROPDOWN` → `notifyTBShowMenu()` / `createMenuFromMenu()`（证据见 `docs/开发计划2.md` P.7.9）。Qt 侧用自管 `QToolButton` + `MenuButtonPopup`（`QAction::setMenu()` 不会回传给 QToolBar 已创建的按钮，已用红灯证实），下拉项复用主菜单 `QAction` 让勾选态天然同步。「文件对比」下拉含与 Git HEAD 比对 / 与 SVN BASE 比对 / **选择文件比对**（新增：Qt 内建文件选择器 + 独立 `EditorView` 编码探测，当前文档在左、所选在右，16MB 护栏），视图子菜单同步新增该项；「显示所有字符」下拉复刻上游，含空白/换行/缩进参考线 + 分隔符 + 总开关。新增 2 个用例并补主体点击回归；双语文档同步。详见 `docs/开发计划2.md` P.7.9。
+
 模块 P.7-MENU（比对菜单收敛与工具条按钮，尚未提交）：「视图」下新增子菜单「文件比对」，收纳 5 个入口（文件对比 / 比对选区 / Git HEAD / SVN BASE / 关闭对比）；`F8`、`Shift+F8` 改为窗口级快捷动作，不再占菜单。`CompareWidget` 的 optionsBar 右侧加入「下一个差异」「上一个差异」「关闭对比」三个按钮，随比对视图创建/销毁，故只在比对模式出现；通过新信号 `closeCompareRequested()` 通知 MainWindow 退出，无反向依赖。新增 `compareMenuIsGroupedAndToolbarHasNavigationButtons` 用例；双语文档同步。详见 `docs/开发计划2.md` P.7.8。
 
 模块 P.7-UI（工具栏比对按钮开关化，尚未提交）：「文件对比」工具栏按钮改为 checkable（深浅主题已有 `:checked` 紫色高亮），点击进入呈选中态、再次点击退出；`Ctrl+Alt+C` 同步为切换语义，`Ctrl+Alt+X` 仍可退出。状态同步集中在 `createCompareView()` / `onCloseCompare()`，菜单、选区、Git/SVN 等所有入口一致，被护栏拒绝时回滚未选中。tooltip 补齐英文词典。新增 `toolbarCompareButtonTogglesCompareMode` 用例；双语文档同步。详见 `docs/开发计划2.md` P.7.7。

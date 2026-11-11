@@ -321,6 +321,11 @@ const QHash<QString, QString>& extraDictionary() {
         // 工具栏可切换按钮的 tooltip：整串收录，避免 translateTooltip 只译主体、残留中文后缀。
         {QStringLiteral("文件对比 (Ctrl+Alt+C，再次点击退出)"),
          QStringLiteral("Compare Files (Ctrl+Alt+C, click again to exit)")},
+        {QStringLiteral("选择文件比对(&F)"), QStringLiteral("Compare with &File...")},
+        {QStringLiteral("选择要比对的文件"), QStringLiteral("Select File to Compare")},
+        {QStringLiteral("所选文件过大，暂不支持比对（上限 16MB）"),
+         QStringLiteral("Selected file is too large to compare (16MB limit)")},
+        {QStringLiteral("无法读取所选文件"), QStringLiteral("Cannot read the selected file")},
 
         // ---- 比对状态栏（运行期拼接，模板与静态串都要收录）----
         {QStringLiteral("比对功能至少需要打开两个标签页"), QStringLiteral("Comparison requires at least two open tabs")},

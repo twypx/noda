@@ -58,6 +58,10 @@ public:
     // 测试因此可以绕开 QFileDialog 的模态对话框。失败返回 false。
     bool openFolderPath(const QString& path);
 
+    // 与指定路径的文件比对（当前文档在左、所选文件在右）。从「选择文件比对」的
+    // 文件对话框回调与回归测试共用同一入口，测试因而可以绕开模态对话框。失败返回 false。
+    bool compareWithFilePath(const QString& path, EditorView* current);
+
     // 处理来自 IPC（其他进程尝试打开文件）的文件列表，在原有标签管理器中打开并激活窗口
     void openFilesFromIpc(const QStringList& files);
 
@@ -225,6 +229,7 @@ private slots:
     // 文件对比
     void onCompareFiles();
     void onCompareSelection();
+    void onCompareWithFile();
     void onCompareGitHead();
     void onCompareSvnBase();
     void onCloseCompare();
@@ -356,6 +361,7 @@ private:
     QAction* _actCompare{nullptr};
     QAction* _toolCompareToggle{nullptr};  // 工具栏可切换按钮，与菜单入口共享状态
     QAction* _actCompareSelection{nullptr};
+    QAction* _actCompareFile{nullptr};
     QAction* _actCompareGit{nullptr};
     QAction* _actCompareSvn{nullptr};
     QAction* _actClearCompare{nullptr};

@@ -36,4 +36,6 @@ private slots:
     void compareModeKeepsTabManagerAlive();
     void toolbarCompareButtonTogglesCompareMode();
     void compareMenuIsGroupedAndToolbarHasNavigationButtons();
+    void toolbarDropdownsAndFileCompareEntry();
+    void compareWithSelectedFileUsesCurrentDocument();
 };

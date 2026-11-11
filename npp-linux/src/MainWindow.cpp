@@ -12,6 +12,8 @@
 #include <QMenu>
 #include <QAction>
 #include <QToolBar>
+#include <QToolButton>
+#include <QDir>
 #include <QStatusBar>
 #include <QFile>
 #include <QFileDialog>
@@ -475,6 +477,7 @@ void MainWindow::setupViewMenu() {
 
     auto* symMenu = menu->addMenu("显示符号");
     _actShowWs = symMenu->addAction("显示空格与制表符", this, &MainWindow::onToggleShowWhitespace);
+    _actShowWs->setObjectName("actShowWhitespace");
     _actShowWs->setCheckable(true);
     _actShowEol = symMenu->addAction("显示换行符", this, &MainWindow::onToggleShowEOL);
     _actShowEol->setCheckable(true);
@@ -554,6 +557,9 @@ void MainWindow::setupViewMenu() {
 
     _actCompareSelection = compareMenu->addAction(tr("比对选区(&S)"), this, &MainWindow::onCompareSelection);
     _actCompareSelection->setObjectName("actCompareSelection");
+
+    _actCompareFile = compareMenu->addAction(tr("选择文件比对(&F)"), this, &MainWindow::onCompareWithFile);
+    _actCompareFile->setObjectName("actCompareFile");
 
     _actCompareGit = compareMenu->addAction(tr("与 Git HEAD 比对(&G)"), this, &MainWindow::onCompareGitHead);
     _actCompareGit->setObjectName("actCompareGit");
@@ -719,12 +725,35 @@ void MainWindow::setupToolBar() {
         {"zoom-out",        "缩小",     &MainWindow::onZoomOut,        QKeySequence(Qt::CTRL | Qt::Key_Minus)},
     };
 
+    // 复刻上游 BTNS_DROPDOWN / TBN_DROPDOWN：按钮主体执行默认动作，右侧箭头弹出子菜单。
+    // Qt 侧必须用自管 QToolButton —— QToolBar 在 addAction() 时就创建了按钮，
+    // 之后 QAction::setMenu() 不会回传给它，下拉箭头不会出现。
+    // 下拉项直接复用主菜单的 QAction，勾选/启用状态天然同步，不需要上游
+    // createMenuFromMenu() 那样手动复制菜单项状态。
+    auto createDropdownToolButton = [this](QAction* action, QMenu* menu,
+                                           const QString& name) -> QToolButton* {
+        auto* button = new QToolButton(_toolBar);
+        button->setObjectName(name);
+        button->setDefaultAction(action);
+        button->setMenu(menu);
+        button->setPopupMode(QToolButton::MenuButtonPopup);
+        button->setIconSize(_toolBar->iconSize());
+        button->setToolButtonStyle(_toolBar->toolButtonStyle());
+        connect(_toolBar, &QToolBar::toolButtonStyleChanged, button,
+                [button](Qt::ToolButtonStyle style) { button->setToolButtonStyle(style); });
+        _toolBar->addWidget(button);
+        return button;
+    };
+
     // 开关型按钮（自动换行 / 显示所有字符 / 缩进参考线）与菜单里同名的 checkable 项共享状态：
     // 两侧只持有各自的 QAction（否则图标会一并出现在菜单里），靠一对 toggled 连接保持勾选同步。
     // setChecked 不会触发 triggered，因此不会把动作执行两遍。
-    auto addToggleTool = [this](const char* iconName, const QString& text,
-                                QAction* menuAct, void (MainWindow::*toggle)(bool)) {
-        QAction* act = _toolBar->addAction(text);
+    auto addToggleTool = [this, createDropdownToolButton](
+                             const char* iconName, const QString& text,
+                             QAction* menuAct, void (MainWindow::*toggle)(bool),
+                             QMenu* dropdown = nullptr,
+                             const char* buttonName = nullptr) -> QAction* {
+        QAction* act = new QAction(text, this);
         act->setCheckable(true);
         if (menuAct) {
             act->setChecked(menuAct->isChecked());
@@ -735,6 +764,12 @@ void MainWindow::setupToolBar() {
         const QString seqText = menuAct ? menuAct->shortcut().toString() : QString();
         act->setToolTip(seqText.isEmpty() ? text : text + " (" + seqText + ")");
         _toolActions.append(qMakePair(act, QString::fromLatin1(iconName)));
+        if (dropdown) {
+            createDropdownToolButton(act, dropdown, QString::fromLatin1(buttonName));
+        } else {
+            _toolBar->addAction(act);
+        }
+        return act;
     };
 
     _toolActions.clear();
@@ -752,21 +787,41 @@ void MainWindow::setupToolBar() {
         _toolActions.append(qMakePair(act, QString::fromLatin1(e.icon)));
     }
 
+    // 「显示所有字符」下拉（对应上游 IDM_VIEW_TAB_SPACE / EOL / ... / ALL_CHARACTERS，
+    // 本项目没有 NPC 相关两项，改放缩进参考线），末尾分隔符后是总开关。
+    auto* symbolDropdown = new QMenu(_toolBar);
+    symbolDropdown->addAction(_actShowWs);
+    symbolDropdown->addAction(_actShowEol);
+    symbolDropdown->addAction(_actShowGuides);
+    symbolDropdown->addSeparator();
+    symbolDropdown->addAction(_actShowAll);
+
+    // 「文件对比」下拉：版本库比对 + 选择文件比对。
+    auto* compareDropdown = new QMenu(_toolBar);
+    compareDropdown->addAction(_actCompareGit);
+    compareDropdown->addAction(_actCompareSvn);
+    compareDropdown->addAction(_actCompareFile);
+
     _toolBar->addSeparator();
     addToggleTool("wrap-text", QStringLiteral("自动换行"), _actWrap, &MainWindow::onToggleWordWrap);
-    addToggleTool("pilcrow", QStringLiteral("显示所有字符"), _actShowAll, &MainWindow::onToggleShowAllChars);
+    QAction* showAllTool = addToggleTool("pilcrow", QStringLiteral("显示所有字符"),
+                                         _actShowAll, &MainWindow::onToggleShowAllChars,
+                                         symbolDropdown, "toolShowAllCharsButton");
+    showAllTool->setObjectName("toolShowAllChars");
     addToggleTool("indent-guide", QStringLiteral("显示缩进参考线"), _actShowGuides, &MainWindow::onToggleShowIndentGuides);
     addToggleTool("binary", QStringLiteral("以十六进制查看"), _actViewHex, &MainWindow::onToggleHexView);
 
     // 「文件对比」是开关型按钮：点击进入比对（选中态），再次点击退出。
-    // 菜单 Ctrl+Alt+C / Ctrl+Alt+X 以及选区、Git/SVN 等入口统一由
+    // 菜单 Ctrl+Alt+C / Ctrl+Alt+X 以及选区、Git/SVN、选择文件等入口统一由
     // createCompareView() / onCloseCompare() 同步它的选中态。
-    _toolCompareToggle = _toolBar->addAction(tr("文件对比(&C)"));
+    _toolCompareToggle = new QAction(tr("文件对比(&C)"), this);
     _toolCompareToggle->setObjectName("toolCompareToggle");
     _toolCompareToggle->setCheckable(true);
     connect(_toolCompareToggle, &QAction::triggered, this, &MainWindow::onCompareFiles);
     _toolCompareToggle->setToolTip(tr("文件对比 (Ctrl+Alt+C，再次点击退出)"));
     _toolActions.append(qMakePair(_toolCompareToggle, QStringLiteral("git-compare")));
+    createDropdownToolButton(_toolCompareToggle, compareDropdown,
+                             QStringLiteral("toolCompareButton"));
 
     refreshToolBarIcons();
 }
@@ -1811,6 +1866,40 @@ void MainWindow::onCompareSelection() {
                       edA->currentLanguage(), edB->currentLanguage());
 }
 
+void MainWindow::onCompareWithFile() {
+    EditorView* current = _tabManager->currentEditor();
+    if (!current) return;
+
+    // 与「打开文件」保持一致：强制 Qt 内建对话框，避免部分 Linux 桌面原生对话框弹不出。
+    const QString path = QFileDialog::getOpenFileName(
+        this, l10n(QStringLiteral("选择要比对的文件")), QDir::homePath(),
+        l10n(QStringLiteral("所有文件 (*.*)")), nullptr,
+        QFileDialog::DontUseNativeDialog);
+    if (path.isEmpty()) return;
+    compareWithFilePath(path, current);
+}
+
+bool MainWindow::compareWithFilePath(const QString& path, EditorView* current) {
+    if (!current || path.isEmpty()) return false;
+
+    constexpr qint64 kMaxCompareBytes = 16 * 1024 * 1024;
+    if (QFileInfo(path).size() > kMaxCompareBytes) {
+        statusBar()->showMessage(
+            l10n(QStringLiteral("所选文件过大，暂不支持比对（上限 16MB）")), 5000);
+        return false;
+    }
+
+    // 用独立 EditorView 走同一套编码探测 / 语言检测 / 行尾识别，避免 GBK / UTF-16 文件乱码。
+    EditorView other;
+    if (!other.loadFromFile(path)) {
+        statusBar()->showMessage(l10n(QStringLiteral("无法读取所选文件")), 5000);
+        return false;
+    }
+    // 当前文档在左、所选文件在右；复用独立只读副本链路，不改动任何标签页。
+    return createCompareView(current->currentTextUtf8(), other.currentTextUtf8(),
+                             current->currentLanguage(), other.currentLanguage());
+}
+
 QString MainWindow::vcsContent(const QString& filePath, bool git) {
     const QFileInfo fi(filePath);
     if (!fi.exists()) return QString();
@@ -1862,7 +1951,8 @@ bool MainWindow::createCompareView(const std::string& textA, const std::string& 
     constexpr size_t kMaxCompareBytes = 16 * 1024 * 1024;
     if (textA.size() > kMaxCompareBytes || textB.size() > kMaxCompareBytes) {
         statusBar()->showMessage(l10n(QStringLiteral("文件过大，暂不支持比对（单侧上限 16MB）")), 5000);
-        setCompareToggleChecked(false);
+        // 不在这里动按钮：下拉/菜单入口失败时按钮本就未变；工具栏入口的回滚由
+        // onCompareFiles() 开头统一处理，避免"仍在比对模式却取消选中"。
         return false;
     }
 

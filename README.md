@@ -81,9 +81,9 @@ and tuned for Linux** — not bolted on through plugins or a compatibility layer
 - [x] Opening a folder: lazy, dependency-free directory tree in a left dock.
 - [x] Built-in hexadecimal / binary viewer with raw on-disk bytes.
 - [x] TypeScript / TSX syntax highlighting.
-- [x] Side-by-side diff: whole files / selection / Git HEAD / SVN BASE, moved blocks,
+- [x] Side-by-side diff: whole files / selection / Git HEAD / SVN BASE / pick a file, moved blocks,
       intra-line character highlights, next/prev navigation (`F8` / `Shift+F8`), mini-map.
-      The toolbar button is a toggle — click again to leave comparison mode (`Ctrl+Alt+X`).
+      The toolbar button is a dropdown toggle — click again to leave comparison mode (`Ctrl+Alt+X`).
 - [x] Ignore whitespace / case / EOL options, runtime English ⇄ 简体中文 switching,
       one-time migration of legacy settings after the rename.
 

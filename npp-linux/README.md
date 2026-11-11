@@ -100,6 +100,12 @@ to Gitee Releases via the API. No repo name is hard-coded.
   name + shortcut tooltips.
 - Icons (Lucide, ISC) are designed as SVG but **pre-rasterized offline** to 16/32 PNG by
   `tools/gen_toolbar_icons.py` and embedded in `toolbar.qrc`; no QtSvg at runtime.
+- **Dropdown toolbar buttons** (`QToolButton` + `MenuButtonPopup`) mirror upstream's
+  `BTNS_DROPDOWN` / `TBN_DROPDOWN`: the main area runs the default action, the arrow opens a
+  submenu. `Compare Files` offers Git HEAD / SVN BASE / file comparison; `Show All Characters`
+  offers whitespace, EOL, indent guides and the all-characters master switch. The dropdowns reuse
+  the main-menu `QAction`s, so checked/enabled states stay in sync without the upstream
+  `createMenuFromMenu()` manual copying.
 - Column (rectangular) selection, column editor (insert text / ascending numbers with
   None / Zeros / Spaces padding), Alt+C.
 
@@ -140,10 +146,13 @@ to Gitee Releases via the API. No repo name is hard-coded.
 
 ## 10. Comparison / Diff (modules P.6 / P.7)
 
-`视图 > 文件比对` is a **submenu** with five entries: `文件对比` (`Ctrl+Alt+C`), `比对选区`,
-`与 Git HEAD 比对`, `与 SVN BASE 比对`, `关闭对比` (`Ctrl+Alt+X`). The toolbar **Compare Files**
-button is a toggle: click to enter comparison (checked / highlighted), click again to exit; `Ctrl+Alt+C`
-has the same toggle semantics.
+`视图 > 文件比对` is a **submenu** with six entries: `文件对比` (`Ctrl+Alt+C`), `比对选区`,
+`选择文件比对`, `与 Git HEAD 比对`, `与 SVN BASE 比对`, `关闭对比` (`Ctrl+Alt+X`). The toolbar
+**Compare Files** button is a dropdown toggle: clicking its main area enters/leaves comparison
+(checked / highlighted), clicking the arrow offers `与 Git HEAD 比对`, `与 SVN BASE 比对` and
+`选择文件比对`. The last one opens a Qt-builtin file dialog and compares the chosen file with the
+current document (current left, chosen right), reusing the same read-only-copy pipeline with a
+16 MB guard. `Ctrl+Alt+C` keeps the same toggle semantics.
 
 Inside comparison mode the options bar (beside *Ignore whitespace* / *Ignore case*) shows three buttons:
 **Next Difference**, **Previous Difference** and **Close Compare**. They are owned by `CompareWidget`,

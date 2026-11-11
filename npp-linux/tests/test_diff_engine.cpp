@@ -11,6 +11,8 @@
 #include <QPointer>
 #include <QMenu>
 #include <QPushButton>
+#include <QToolBar>
+#include <QToolButton>
 #include "widgets/DiffMiniMap.h"
 #include "utils/ConfigMigration.h"
 
@@ -712,6 +714,16 @@ void TestDiffEngine::toolbarCompareButtonTogglesCompareMode()
     actClear->trigger();
     QVERIFY(!btn->isChecked());
     QVERIFY(win.findChild<CompareWidget*>() == nullptr);
+
+    // 改为下拉按钮后，主体点击仍执行默认切换动作（只有右侧箭头才弹菜单）。
+    auto* compareButton = win.findChild<QToolButton*>("toolCompareButton");
+    QVERIFY(compareButton != nullptr);
+    compareButton->click();
+    QVERIFY(btn->isChecked());
+    QVERIFY(win.findChild<CompareWidget*>() != nullptr);
+    compareButton->click();
+    QVERIFY(!btn->isChecked());
+    QVERIFY(win.findChild<CompareWidget*>() == nullptr);
 }
 
 // 视图菜单里的比对项收敛为一个子菜单；差异导航/关闭对比只在比对模式的工具条上出现。
@@ -722,7 +734,7 @@ void TestDiffEngine::compareMenuIsGroupedAndToolbarHasNavigationButtons()
 
     auto* compareMenu = win.findChild<QMenu*>("menuCompare");
     QVERIFY(compareMenu != nullptr);
-    QCOMPARE(compareMenu->actions().size(), 5);
+    QCOMPARE(compareMenu->actions().size(), 6);
     // 五个入口都归属子菜单，而不是平铺在「视图」里。
     for (const char* name : {"actCompare", "actCompareSelection", "actCompareGit",
                             "actCompareSvn", "actClearCompare"}) {
@@ -770,4 +782,77 @@ void TestDiffEngine::compareMenuIsGroupedAndToolbarHasNavigationButtons()
     QVERIFY(win.findChild<CompareWidget*>() == nullptr);
     QVERIFY(win.findChild<QPushButton*>("btnNextDiff") == nullptr);
     QCOMPARE(win.centralWidget(), static_cast<QWidget*>(tabMgr));
+}
+
+// 工具栏「文件对比」与「显示所有字符」为下拉按钮（上游 BTNS_DROPDOWN 语义），
+// 且「选择文件比对」入口同时存在于下拉与视图子菜单。
+void TestDiffEngine::toolbarDropdownsAndFileCompareEntry()
+{
+    MainWindow win;
+    win.show();
+    auto* tb = win.findChild<QToolBar*>();
+    QVERIFY(tb != nullptr);
+
+    auto* compareAct = win.findChild<QAction*>("toolCompareToggle");
+    QVERIFY(compareAct != nullptr);
+    auto* compareBtn = win.findChild<QToolButton*>("toolCompareButton");
+    QVERIFY(compareBtn != nullptr);
+    QCOMPARE(compareBtn->popupMode(), QToolButton::MenuButtonPopup);
+    QVERIFY2(compareBtn->menu() != nullptr, "QToolButton 也应持有下拉菜单");
+    QCOMPARE(compareBtn->menu()->actions().size(), 3);
+    QVERIFY(compareBtn->menu()->actions().contains(win.findChild<QAction*>("actCompareFile")));
+    QVERIFY(compareBtn->menu()->actions().contains(win.findChild<QAction*>("actCompareGit")));
+    QVERIFY(compareBtn->menu()->actions().contains(win.findChild<QAction*>("actCompareSvn")));
+
+    auto* showAllAct = win.findChild<QAction*>("toolShowAllChars");
+    QVERIFY(showAllAct != nullptr);
+    auto* showAllBtn = win.findChild<QToolButton*>("toolShowAllCharsButton");
+    QVERIFY(showAllBtn != nullptr);
+    QCOMPARE(showAllBtn->popupMode(), QToolButton::MenuButtonPopup);
+    QVERIFY(showAllBtn->menu() != nullptr);
+    // 显示空格与制表符 / 显示换行符 / 显示缩进参考线 / 分隔符 / 显示所有字符
+    QCOMPARE(showAllBtn->menu()->actions().size(), 5);
+    QVERIFY(showAllBtn->menu()->actions().contains(win.findChild<QAction*>("actShowWhitespace")));
+    // 下拉复用主菜单的 QAction，点击后仍走原槽并翻转勾选态。
+    auto* showWs = win.findChild<QAction*>("actShowWhitespace");
+    QVERIFY(showWs != nullptr);
+    const bool wsBefore = showWs->isChecked();
+    showWs->trigger();
+    QCOMPARE(showWs->isChecked(), !wsBefore);
+
+    auto* compareMenu = win.findChild<QMenu*>("menuCompare");
+    QVERIFY(compareMenu != nullptr);
+    QVERIFY(win.findChild<QAction*>("actCompareFile") != nullptr);
+    QVERIFY(compareMenu->actions().contains(win.findChild<QAction*>("actCompareFile")));
+}
+
+// 「选择文件比对」：当前文档在左、所选文件在右，走独立只读副本且不改动标签页。
+void TestDiffEngine::compareWithSelectedFileUsesCurrentDocument()
+{
+    QTemporaryFile tmp;
+    QVERIFY(tmp.open());
+    const QByteArray otherText = "head\nFROM_FILE\ntail\n";
+    QCOMPARE(tmp.write(otherText), static_cast<qint64>(otherText.size()));
+    QVERIFY(tmp.flush());
+
+    MainWindow win;
+    win.show();
+    auto* tabMgr = win.findChild<TabManager*>();
+    QVERIFY(tabMgr != nullptr);
+    auto* ed = tabMgr->currentEditor();
+    QVERIFY(ed != nullptr);
+    ed->setTextFromUtf8("head\nCURRENT\ntail\n");
+
+    QVERIFY(win.compareWithFilePath(tmp.fileName(), ed));
+    auto* cmp = win.findChild<CompareWidget*>();
+    QVERIFY(cmp != nullptr);
+    QCOMPARE(QString::fromStdString(cmp->editorA()->currentTextUtf8()),
+             QStringLiteral("head\nCURRENT\ntail\n"));
+    QCOMPARE(QString::fromStdString(cmp->editorB()->currentTextUtf8()),
+             QStringLiteral("head\nFROM_FILE\ntail\n"));
+    QVERIFY(cmp->totalDiffCount() > 0);
+    QVERIFY(win.findChild<QAction*>("toolCompareToggle")->isChecked());
+    // 原标签页内容未被改动
+    QCOMPARE(QString::fromStdString(ed->currentTextUtf8()),
+             QStringLiteral("head\nCURRENT\ntail\n"));
 }
