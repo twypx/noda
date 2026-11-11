@@ -242,9 +242,11 @@ upload_asset() {  # path -> 打印 browser_download_url
 }
 
 # 校验和：两份包写进同一个 SHA256SUMS，便于用户一次性校验。
-SUM_FILE="$(mktemp)"
-( cd "$(dirname "$DEB")"      && sha256sum "$(basename "$DEB")" ; \
-  cd "$(dirname "$APPIMAGE")" && sha256sum "$(basename "$APPIMAGE")" ) > "$SUM_FILE"
+SUM_FILE="$(dirname "$DEB")/SHA256SUMS"
+# 分别用独立子 shell 计算校验和：deb 与 AppImage 都在 ./dist 下，若在同一个子 shell
+# 里连续两次 cd 相对路径，第二次会变成 ./dist/dist 而失败（set -e 会中断整个发版）。
+( cd "$(dirname "$DEB")"      && sha256sum "$(basename "$DEB")" ) >  "$SUM_FILE"
+( cd "$(dirname "$APPIMAGE")" && sha256sum "$(basename "$APPIMAGE")" ) >> "$SUM_FILE"
 
 UP_DEB="$(upload_asset "$DEB")"
 UP_APPIMAGE="$(upload_asset "$APPIMAGE")"
