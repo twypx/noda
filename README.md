@@ -4,22 +4,91 @@
 
 <h1 align="center">Noda</h1>
 
-<p align="center"><b>The fastest native text editor for Linux.</b><br>
-C++20 + Qt6 Widgets · Scintilla/Lexilla core · no Wine, no Electron, no WebView.</p>
+<p align="center">
+  <img alt="version" src="https://img.shields.io/badge/version-1.0.18-blue">
+  <img alt="license" src="https://img.shields.io/badge/license-GPL--3.0-or-later-green">
+  <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20(x11%20%2B%20wayland)-orange">
+  <img alt="lang" src="https://img.shields.io/badge/UI-English%20%2F%20Chinese-9cf">
+</p>
+
+<p align="center"><b>A native Linux port of Notepad++.</b> C++20 + Qt6 Widgets · cold start ~80–120 ms · ~35–45 MB RSS · built-in hex view, folder workspace and a large-file diff engine.</p>
 
 <p align="center">
-  <b>English</b> &nbsp;|&nbsp; <a href="docs/README.zh-CN.md">简体中文</a>
+  <b>English</b> &nbsp;|&nbsp; <a href="docs/README.zh-CN.md">Chinese</a>
 </p>
 
 ---
 
-Noda is a native Linux text editor **derived from Notepad++ source code**. It keeps the upstream
-assets and logic (`langs.model.xml`, `stylers.model.xml`, uchardet, Scintilla, Lexilla) but is
-rewritten as a pure Qt6 Widgets application. It is **not** a Wine wrapper and **not** an Electron app.
+## Screenshots
 
-> **Attribution.** Noda is an independent modification of Notepad++ source code, released under
-> GPL-3.0. It is not affiliated with, endorsed by, or connected to Notepad++ or its author.
+<p align="center">
+  <img src="docs/images/editor.png" width="360" alt="Main editor">
+  <img src="docs/images/setting.png" width="360" alt="Preferences / Settings">
+</p>
+<p align="center"><sub>Main editor · syntax highlighting / multi-tab &nbsp;·&nbsp; Preferences / Settings · tree categories, accent color</sub></p>
 
+<p align="center">
+  <img src="docs/images/hex.png" width="360" alt="Hex viewer">
+  <img src="docs/images/compare.png" width="360" alt="Document compare">
+</p>
+<p align="center"><sub>Hex / binary viewer · true on-disk bytes &nbsp;·&nbsp; Document compare · large-file diff engine</sub></p>
+
+<p align="center">
+  <img src="docs/images/english.png" width="360" alt="English interface">
+  <img src="docs/images/dark.png" width="360" alt="Dark mode">
+</p>
+<p align="center"><sub>English interface · runtime EN ⇄ ZH switch &nbsp;·&nbsp; Dark mode · Obsidian-inspired light/dark tokens</sub></p>
+
+## Install
+
+**AppImage (recommended — no install, double-click to run, bundles the Qt6 runtime):**
+
+```bash
+# Download from Releases (replace OWNER/REPO with your actual Gitee repo path)
+wget -O noda.AppImage https://gitee.com/OWNER/REPO/releases/download/v1.0.18/noda-x86_64.AppImage
+chmod +x noda.AppImage && ./noda.AppImage
+```
+
+> Attach the AppImage as a Release asset when publishing; or generate it locally: `./npp-linux/build_appimage.sh`.
+
+**Debian / Ubuntu (.deb):**
+
+```bash
+wget -O noda.deb https://gitee.com/OWNER/REPO/releases/download/v1.0.18/noda_*_amd64.deb
+sudo apt install ./noda.deb
+```
+
+**Or build from source (about 1 minute):**
+
+```bash
+sudo apt update && sudo apt install -y build-essential cmake qt6-base-dev qt6-base-dev-tools libxcb1-dev
+cd npp-linux && ./build.sh && ./build/noda
+```
+
+> One-click packaging of DEB + AppImage: `./npp-linux/build_package.sh` (add `--checksum` to also emit `SHA256SUMS`).
+
+---
+
+> **Attribution notice.** Noda is an independent modification of the Notepad++ source code, released under **GPL-3.0-or-later**. It is **not affiliated with, endorsed by, or connected to Notepad++ or its author**, and is not an official Notepad++ release. Upstream Notepad++ code is Copyright (C) 2021 Don HO. Third-party components (Scintilla / Lexilla / uchardet / pugixml / AStyle) retain their own licenses — see [`NOTICE`](NOTICE) and [`LICENSE`](LICENSE).
+
+## How is Noda different from other editors?
+
+Noda's selling point is not "yet another editor" — it is **bringing Notepad++'s operating habits and feature density to Linux as a truly native, lightweight, high-performance app that does not pile on features via plugins.**
+
+| Dimension | **Noda** | Notepad++ | gedit | Kate | VSCode |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Native Linux | ✓ Qt6 | ✗ Windows-only | ✓ GTK | ✓ KDE | ✗ Electron |
+| Cold start | **~80–120 ms** | fast (Windows) | fast | medium | slow (~1s+) |
+| Memory | **~35–45 MB** | low | low | medium-high | high (hundreds of MB) |
+| Hex / binary view | ✓ built-in | ~ plugin | ✗ | ~ plugin | ✗ extension |
+| Folder workspace | ✓ built-in | ~ plugin | ✗ | ✓ | ✓ |
+| Document compare (large files) | ✓ built-in engine | ~ plugin | ✗ | ✓ | ✓ extension |
+| Code formatting | ✓ AStyle / JSON | ~ plugin | ✗ | ~ plugin | ✓ extension |
+| Bilingual UI (runtime switch) | ✓ | ~ multilingual | system | system | system |
+| Accent color customization | ✓ | ~ | system | system | ✓ |
+| Notepad++ habits | ✓ ported | ✓ | ✗ | ✗ | ✗ |
+
+> Trade-off: Noda trades the plugin ecosystem for "built-in, zero-dependency, Linux-tuned" — common features work out of the box instead of being patched in via plugins or compatibility layers. If you need a huge extension marketplace, VSCode fits better; if you want **native, light, fast, Notepad++-like**, that's Noda.
 
 ## What Noda adds over Notepad++
 
@@ -28,11 +97,11 @@ and tuned for Linux** — not bolted on through plugins or a compatibility layer
 
 | Capability | Notepad++ (Windows) | Noda |
 |---|---|---|
-| Platform | Windows only | **Native Linux** (X11 + Wayland), `.deb`, `.desktop`, hicolor icons |
+| Platform | Windows only | **Native Linux** (X11 + Wayland), `.deb`, `.AppImage`, `.desktop`, hicolor icons |
 | Runtime | Win32 / GDI | **C++20 + Qt6 Widgets**, ~80–120 ms cold start, ~35–45 MB RSS |
 | Binary / hex view | Via the HexEditor plugin | **Built-in raw-byte viewer** — `mmap`, viewport-only reads, no full-file copy, >4 GB–safe addresses |
 | Folder workspace | "Folder as Workspace" | **Built-in dock** with lazy loading, zero recursive pre-scan, custom branch/indent painting |
-| UI language | `nativeLang/*.xml` | **Runtime English ⇄ 简体中文 switch**, fully bilingual menus, tooltips and status bar |
+| UI language | `nativeLang/*.xml` | **Runtime English ⇄ Chinese switch**, fully bilingual menus, tooltips and status bar |
 | Theme | Built-in themes | **Obsidian-inspired light/dark tokens**, unified UI font (CJK + Latin), native borderless title bar |
 | Code formatting | Plugins / external tools | **Built-in AStyle (C/C++/C#/Java/Obj-C) + JSON formatter**, runs off the UI thread |
 | TypeScript | By lexer config | **`.ts` / `.tsx` highlighting** reusing the cpp lexer with correct properties |
@@ -86,10 +155,10 @@ and tuned for Linux** — not bolted on through plugins or a compatibility layer
 - [x] Side-by-side diff: whole files / selection / Git HEAD / SVN BASE / pick a file, moved blocks,
       intra-line character highlights, next/prev navigation (`F8` / `Shift+F8`), mini-map.
       The toolbar button is a dropdown toggle — click again to leave comparison mode (`Ctrl+Alt+X`).
-- [x] Ignore whitespace / case / EOL options, runtime English ⇄ 简体中文 switching,
+- [x] Ignore whitespace / case / EOL options, runtime English ⇄ Chinese switching,
       one-time migration of legacy settings after the rename.
 
-## Quick start
+## Quick start (from source)
 
 ```bash
 sudo apt update
@@ -106,6 +175,14 @@ Package as a `.deb`:
 cd npp-linux
 ./build_deb.sh
 sudo apt install ./build-deb/noda_*_amd64.deb
+```
+
+Package as an **AppImage** (single file, no install):
+
+```bash
+cd npp-linux
+./build_appimage.sh
+chmod +x noda-*.AppImage && ./noda-*.AppImage
 ```
 
 Toolbar and application icons are generated offline by `npp-linux/tools/*.py` and embedded as
@@ -128,17 +205,25 @@ This repository vendors every third-party source needed to build, so the directo
 ## Documentation
 
 - English technical reference: **[npp-linux/README.md](npp-linux/README.md)** (default)
-- 完整中文技术文档: **[docs/README.technical.zh-CN.md](docs/README.technical.zh-CN.md)**
-- Development plan & module log: **[docs/开发计划2.md](docs/开发计划2.md)**
-- 简体中文产品说明: **[docs/README.zh-CN.md](docs/README.zh-CN.md)**
+- Chinese product guide: **[docs/README.zh-CN.md](docs/README.zh-CN.md)**
+- Contributing (English): **[CONTRIBUTING.md](CONTRIBUTING.md)** — includes `good first issue` entry-level tasks
+- Contributing (Chinese): **[docs/CONTRIBUTING.zh-CN.md](docs/CONTRIBUTING.zh-CN.md)**
+- Changelog: **[CHANGELOG.md](CHANGELOG.md)**
+
+## Contributing
+
+PRs are welcome. Please read **[CONTRIBUTING.md](CONTRIBUTING.md)** first — it covers local
+build, the TDD development rules, and the `good first issue` entry-level tasks. Features that
+can't meet the performance bar are better left undone.
 
 ## License
 
-- Noda is released under the **GNU General Public License v3.0 (GPL-3.0)** — see [`LICENSE`](LICENSE).
-  Original Notepad++ code is Copyright (C) 2021 Don HO <don.h@free.fr>.
-- `scintilla/` and `lexilla/` are under Neil Hodgson's permissive licenses (see each `License.txt`).
-- `PowerEditor/src/uchardet/` is triple-licensed **MPL 1.1 / GPL 2.0 / LGPL 2.1**.
-- `PowerEditor/src/pugixml/` is **MIT**.
+- Noda is released under the **GNU General Public License v3.0-or-later (GPL-3.0-or-later)** —
+  see [`LICENSE`](LICENSE) (`SPDX-License-Identifier: GPL-3.0-or-later`).
+- A summary of third-party component licenses is in [`NOTICE`](NOTICE): `scintilla/` and
+  `lexilla/` are under Neil Hodgson's permissive license; `PowerEditor/src/uchardet/` is
+  MPL 1.1 / GPL 2.0 / LGPL 2.1 (tri-license); `PowerEditor/src/pugixml/` is MIT;
+  `third_party/astyle/` is LGPL-3.0.
 
 Noda is an independent project. It is not affiliated with, endorsed by, or connected to Notepad++
 or its author, and it is not an official release of the Notepad++ project.

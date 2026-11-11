@@ -25,3 +25,9 @@ __pycache__/
 .DS_Store
 
 .codebuddy
+
+# 内部开发文档：不对外暴露，也不提交到远程
+private/
+
+# 一键打包脚本产出的聚合目录
+artifacts/

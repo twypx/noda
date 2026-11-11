@@ -1,0 +1,22 @@
+Noda
+Copyright (C) 2026 The Noda contributors
+
+This product is an **independent modification of Notepad++ source code**, released under
+the GNU General Public License v3.0 (GPL-3.0). It is **not affiliated with, endorsed by,
+or connected to Notepad++ or its author**, and is not an official release of the Notepad++
+project.
+
+Upstream Notepad++ code is Copyright (C) 2021 Don HO <don.h@free.fr>.
+
+Third-party components retained from their respective upstreams and vendored under
+their own licenses:
+
+  - scintilla/        Neil Hodgson — Permissive License (see scintilla/License.txt)
+  - lexilla/         Neil Hodgson — Permissive License (see lexilla/License.txt)
+  - PowerEditor/src/uchardet/   MPL 1.1 / GPL 2.0 / LGPL 2.1 (tri-license)
+  - PowerEditor/src/pugixml/    MIT License
+  - third_party/astyle/         GNU Lesser General Public License v3.0
+
+Noda application code: GPL-3.0-or-later. See LICENSE for the full text.
+
+SPDX-License-Identifier: GPL-3.0-or-later

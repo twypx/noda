@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 一键发版：打 tag → 构建 deb → 推送 → 在 Gitee 建 Release 并附上 deb。
+# 一键发版：打 tag → 构建 deb + AppImage → 推送 → 在 Gitee 建 Release 并附上 deb 与 AppImage。
 #
 # 用法：
 #   export GITEE_TOKEN=xxxxxxxx        # Gitee 私人令牌，勾选 projects 权限即可
@@ -157,12 +157,23 @@ if [[ "$DEB_VERSION" != "${VERSION}-1" ]]; then
 fi
 echo ">>> 产物: ${DEB_NAME} ($(du -h "$DEB" | cut -f1))"
 
+# ---- 6b. 构建 AppImage ----------------------------------------------------
+echo ">>> 开始构建 AppImage ..."
+./npp-linux/build_appimage.sh
+APPIMAGE="$(ls -1t ./npp-linux/noda-*.AppImage 2>/dev/null | head -1)"
+if [[ -z "$APPIMAGE" ]]; then
+    echo "错误: 未找到生成的 AppImage" >&2
+    exit 1
+fi
+APPIMAGE_NAME="$(basename "$APPIMAGE")"
+echo ">>> 产物: ${APPIMAGE_NAME} ($(du -h "$APPIMAGE" | cut -f1))"
+
 if [[ $DRY_RUN -eq 1 ]]; then
     if [[ $VERSION_BUMPED -eq 1 ]]; then
         echo ">>> 注意: CMakeLists 的 VERSION 已改为 ${VERSION}，但 dry-run 不改 git 历史，"
         echo "    这份改动留在工作区里，正式发版时会自动提交并推送"
     fi
-    echo ">>> --dry-run：跳过推送与 Release 上传，以上校验全部通过"
+    echo ">>> --dry-run：跳过推送与 Release 上传，DEB / AppImage 校验全部通过"
     exit 0
 fi
 
@@ -213,18 +224,34 @@ else
     echo ">>> 已创建 Release ${TAG} (id=${RELEASE_ID})"
 fi
 
-# ---- 10. 上传 deb ----------------------------------------------------------
-echo ">>> 上传 ${DEB_NAME} ..."
-UPLOAD="$(curl -sS -X POST "${API}/releases/${RELEASE_ID}/attach_files" \
-    -F "access_token=${GITEE_TOKEN}" \
-    -F "file=@${DEB}")"
-DOWNLOAD_URL="$(echo "$UPLOAD" | json_field browser_download_url)"
-if [[ -z "$DOWNLOAD_URL" ]]; then
-    echo "错误: 附件上传失败，接口返回：" >&2
-    echo "$UPLOAD" >&2
-    exit 1
-fi
+# ---- 10. 上传 deb / AppImage / 校验和 --------------------------------------
+upload_asset() {  # path -> 打印 browser_download_url
+    local f="$1" fname="$(basename "$1")"
+    echo ">>> 上传 ${fname} ..."
+    local resp
+    resp="$(curl -sS -X POST "${API}/releases/${RELEASE_ID}/attach_files" \
+        -F "access_token=${GITEE_TOKEN}" \
+        -F "file=@${f}")"
+    local url="$(echo "$resp" | json_field browser_download_url)"
+    if [[ -z "$url" ]]; then
+        echo "错误: 附件上传失败（${fname}），接口返回：" >&2
+        echo "$resp" >&2
+        exit 1
+    fi
+    echo "$url"
+}
+
+# 校验和：两份包写进同一个 SHA256SUMS，便于用户一次性校验。
+SUM_FILE="$(mktemp)"
+( cd "$(dirname "$DEB")"      && sha256sum "$(basename "$DEB")" ; \
+  cd "$(dirname "$APPIMAGE")" && sha256sum "$(basename "$APPIMAGE")" ) > "$SUM_FILE"
+
+UP_DEB="$(upload_asset "$DEB")"
+UP_APPIMAGE="$(upload_asset "$APPIMAGE")"
+UP_SUM="$(upload_asset "$SUM_FILE")"
 
 echo "=== 发布完成 ==="
 echo "    Release : https://gitee.com/${OWNER}/${REPO}/releases/tag/${TAG}"
-echo "    下载    : ${DOWNLOAD_URL}"
+echo "    DEB     : ${UP_DEB}"
+echo "    AppImage: ${UP_APPIMAGE}"
+echo "    校验和  : ${UP_SUM}"

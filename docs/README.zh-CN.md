@@ -37,6 +37,28 @@ Qt6 Widgets 重写。它不是 Wine 包装，也不是 Electron 应用。
 | TypeScript | 依赖词法器配置 | **`.ts` / `.tsx` 高亮**，复用 cpp 词法器并补全正确属性 |
 | 会话与备份 | 周期性备份 | **会话快照 + 自动备份**，未保存内容连同光标位置原样恢复 |
 
+## 它和别的编辑器有什么不同？
+
+Noda 的卖点不是“又一个编辑器”，而是：**把 Notepad++ 的操作习惯与功能密度，做成 Linux 上
+一个真正原生、轻量、不靠插件堆功能的高性能应用。**
+
+| 维度 | **Noda** | Notepad++ | gedit | Kate | VSCode |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Linux 原生 | ✓ Qt6 | ✗ 仅 Windows | ✓ GTK | ✓ KDE | ✗ Electron |
+| 冷启动 | **~80–120 ms** | 快(Windows) | 快 | 中 | 慢(~1s+) |
+| 内存占用 | **~35–45 MB** | 低 | 低 | 中高 | 高(数百 MB) |
+| 十六进制 / 二进制查看 | ✓ 内置 | ~ 插件 | ✗ | ~ 插件 | ✗ 扩展 |
+| 文件夹工作区 | ✓ 内置 | ~ 插件 | ✗ | ✓ | ✓ |
+| 文档比对（大文件） | ✓ 内置引擎 | ~ 插件 | ✗ | ✓ | ✓ 扩展 |
+| 代码格式化 | ✓ AStyle / JSON | ~ 插件 | ✗ | ~ 插件 | ✓ 扩展 |
+| 中英双语界面（运行时切换） | ✓ | ~ 多语言 | 系统 | 系统 | 系统 |
+| 主题色自定义 | ✓ | ~ | 系统 | 系统 | ✓ |
+| Notepad++ 操作习惯 | ✓ 移植 | ✓ | ✗ | ✗ | ✗ |
+
+> 取舍：Noda 用“内置、零依赖、为 Linux 调优”换掉了插件生态——常用功能开箱即用，而不是
+> 靠插件或兼容层补上。如果你最需要的是海量扩展市场，VSCode 更合适；如果你要的是
+> **原生、轻、快、像 Notepad++**，就是 Noda。
+
 ## 亮点
 
 - **性能优先的工程实现**：选词高亮只扫可见区域并带硬性时间预算、字体清单与主题元信息单例、
@@ -118,9 +140,10 @@ sudo apt install ./build-deb/noda_*_amd64.deb
 ## 文档
 
 - 英文技术文档（默认）：**[../npp-linux/README.md](../npp-linux/README.md)**
-- 完整中文技术文档：**[README.technical.zh-CN.md](README.technical.zh-CN.md)**
-- 开发计划与模块记录：**[开发计划2.md](开发计划2.md)**
-- English README: **[../README.md](../README.md)**
+- 英文 README：**[../README.md](../README.md)**
+- 贡献指南（中文）：**[../docs/CONTRIBUTING.zh-CN.md](../docs/CONTRIBUTING.zh-CN.md)**
+- 贡献指南（英文）：**[../CONTRIBUTING.md](../CONTRIBUTING.md)**
+- 版本变更：**[../CHANGELOG.md](../CHANGELOG.md)**
 
 ## 许可
 
