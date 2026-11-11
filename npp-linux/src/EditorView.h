@@ -197,6 +197,11 @@ public:
     void unfoldLevel(int level);
     void setShowWhitespace(bool show);
     void setShowEOL(bool show);
+    // 非打印字符（NPC）/ 控制字符与 Unicode 换行符（CcUniEOL）：复刻上游
+    // ScintillaEditView::showNpc()/showCcUniEol()，基于 SCI_SETREPRESENTATION
+    // 把不可见字符替换为缩写表示。两开关共享一张表示表，内部合成重放。
+    void setShowNpc(bool show);
+    void setShowCcUniEol(bool show);
     void setShowIndentGuides(bool show);
     void setShowLineNumbers(bool show);
     void updateLineNumberMarginWidth(bool force = false);
@@ -270,6 +275,10 @@ private:
     QString _lastSaveError;
     bool _isDarkMode{false};
     bool _showLineNumbers{true};
+    bool _showNpc{false};
+    bool _showCcUniEol{false};
+    // NPC / CcUniEOL 共用表示表：清空后按两个开关的当前状态合成重放。
+    void applyInvisibleCharRepresentations();
     int _lastLineCount{-1};
     int _lastLineDigits{-1};
     std::string _currentLang{"normal"};

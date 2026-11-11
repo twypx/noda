@@ -100,6 +100,9 @@ const QHash<QString, QString>& extraDictionary() {
         {QStringLiteral("显示行号列"), QStringLiteral("Show line number margin")},
         {QStringLiteral("显示代码折叠列"), QStringLiteral("Show folding margin")},
         {QStringLiteral("显示缩进参考线"), QStringLiteral("Show indentation guides")},
+        {QStringLiteral("显示非打印字符"), QStringLiteral("Show Non-Printing Characters")},
+        // 与 nativeLang 词典行为一致：英文原文先去掉助记符 '&amp;' 再入表。
+        {QStringLiteral("显示控制字符和 Unicode 换行符"), QStringLiteral("Show Control Characters  Unicode EOL")},
         {QStringLiteral("显示换行符符号"), QStringLiteral("Show end-of-line symbols")},
         {QStringLiteral("启用字体平滑与亚像素抗锯齿"), QStringLiteral("Enable font smoothing and subpixel antialiasing")},
         {QStringLiteral("<h3>配色方案</h3>"), QStringLiteral("<h3>Theme</h3>")},

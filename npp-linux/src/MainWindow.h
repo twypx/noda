@@ -188,6 +188,8 @@ private slots:
     void onToggleWordWrap(bool wrap);
     void onToggleShowWhitespace(bool show);
     void onToggleShowEOL(bool show);
+    void onToggleShowNpc(bool show);
+    void onToggleShowCcUniEol(bool show);
     void onToggleShowAllChars(bool show);
     void onToggleShowIndentGuides(bool show);
     void onZoomIn();
@@ -351,7 +353,9 @@ private:
     QAction* _actWrap{nullptr};
     QAction* _actShowWs{nullptr};
     QAction* _actShowEol{nullptr};
-    QAction* _actShowAll{nullptr};   // "显示所有字符" = 空格/制表符 + 换行符 两个开关同时置位
+    QAction* _actShowAll{nullptr};   // "显示所有字符" = 空格/EOL/NPC/CcUniEOL 四个开关同时置位（同 上游 allChecked）
+    QAction* _actShowNpc{nullptr};
+    QAction* _actShowCcUniEol{nullptr};
     QAction* _actShowGuides{nullptr};
     QAction* _actAlwaysOnTop{nullptr};
     QAction* _actReadOnly{nullptr};

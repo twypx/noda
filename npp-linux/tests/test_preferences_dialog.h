@@ -44,4 +44,6 @@ private slots:
     void accentColorLoadsFromSettings();
     // 默认主题色必须逐字节还原改造前的紫色令牌，视觉零回归。
     void defaultAccentKeepsOriginalPalette();
+    // 目录树（首选项左侧 + 文件树）选中/hover 底色必须跟随主题色，而非写死紫色。
+    void treeSelectionFollowsAccentColor();
 };

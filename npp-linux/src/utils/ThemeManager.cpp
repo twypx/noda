@@ -7,11 +7,8 @@
 
 namespace {
 
-// 目录树行的 hover / 选中底色：QSS 与自绘缩进区共用，改一处即可。
-constexpr const char* kTreeHoverDark = "#333333";
-constexpr const char* kTreeHoverLight = "#f0edf8";
-constexpr const char* kTreeSelectedDark = "#3d3550";
-constexpr const char* kTreeSelectedLight = "#ddd3f5";
+// 目录树行的 hover / 选中底色：QSS 与自绘缩进区共用，跟随主题色。
+// 默认基色下必须精确还原改造前的紫色，保证零回归；自定义色才按明度派生。
 
 bool s_darkTheme = false;
 QFont s_uiFont;
@@ -49,6 +46,27 @@ QColor accentTint() {
     return mixWithWhite(s_accent, 0.88);
 }
 
+QColor mixColors(const QColor& a, const QColor& b, qreal t) {
+    return QColor::fromRgbF(a.redF() * (1 - t) + b.redF() * t,
+                            a.greenF() * (1 - t) + b.greenF() * t,
+                            a.blueF() * (1 - t) + b.blueF() * t);
+}
+
+// 目录树选中底色：跟随主题色。默认基色精确还原改造前的紫色，自定义色按明度派生。
+QColor treeSelectedColor(bool isDark) {
+    if (s_accent == kDefaultAccent)
+        return isDark ? QColor(0x3d, 0x35, 0x50) : QColor(0xdd, 0xd3, 0xf5);
+    return isDark ? accentDeep().darker(160) : accentTint();
+}
+
+// 目录树 hover 底色：跟随主题色，保持低调（深色近中性，浅色极淡着色）。
+QColor treeHoverColor(bool isDark) {
+    if (s_accent == kDefaultAccent)
+        return isDark ? QColor(0x33, 0x33, 0x33) : QColor(0xf0, 0xed, 0xf8);
+    return isDark ? mixColors(QColor(0x33, 0x33, 0x33), accentDeep(), 0.3)
+                  : mixWithWhite(s_accent, 0.92);
+}
+
 // QSS 的 image: 只认固定像素的 PNG，没有 DPR 概念。标签关闭按钮原来直接写死 x_16.png，
 // 2x 屏上它被按逻辑 16px（= 物理 32px）绘制，等于把 16px 原图拉大一倍，看着就是糊的；
 // 工具栏里同一枚 x 走的是 toolBarIcon() 的 QIcon + setDevicePixelRatio(2)，一直清晰，
@@ -75,6 +93,16 @@ QString dockCloseIcon(bool isDark) {
     return QStringLiteral("url(:/toolbar/%1/%2)").arg(dir, file);
 }
 
+// QToolButton(MenuButtonPopup) 下拉箭头：chevron 已按深浅前景各生成一套，
+// 同样按屏幕 DPR 选源图，2x 屏不糊。
+QString menuArrowImage(bool isDark) {
+    const QString dir = isDark ? QStringLiteral("dark") : QStringLiteral("light");
+    const qreal dpr = qApp ? qApp->devicePixelRatio() : 1.0;
+    const QString file = dpr <= 1.01 ? QStringLiteral("chevron-down_16.png")
+                                     : QStringLiteral("chevron-down_32.png");
+    return QStringLiteral("url(:/toolbar/%1/%2)").arg(dir, file);
+}
+
 // QSS 里若写死 font-family，QApplication::setFont() 会被样式表覆盖，
 // 首选项里的中/英文字体就永远看不到效果。这里只生成 font-family 声明。
 QString uiFontDeclaration() {
@@ -95,11 +123,10 @@ QString finishStyleSheet(const QString& css, bool isDark) {
     QString out = css;
     out.replace(QStringLiteral("@CLOSE_BUTTON_IMAGE@"), closeButtonImage(isDark));
     out.replace(QStringLiteral("@DOCK_CLOSE_ICON@"), dockCloseIcon(isDark));
+    out.replace(QStringLiteral("@MENU_ARROW_IMAGE@"), menuArrowImage(isDark));
     out.replace(QStringLiteral("@UI_FONT_FAMILY_DECL@"), uiFontDeclaration());
-    out.replace(QStringLiteral("@TREE_HOVER_COLOR@"),
-                QLatin1String(isDark ? kTreeHoverDark : kTreeHoverLight));
-    out.replace(QStringLiteral("@TREE_SELECTED_COLOR@"),
-                QLatin1String(isDark ? kTreeSelectedDark : kTreeSelectedLight));
+    out.replace(QStringLiteral("@TREE_HOVER_COLOR@"), treeHoverColor(isDark).name());
+    out.replace(QStringLiteral("@TREE_SELECTED_COLOR@"), treeSelectedColor(isDark).name());
     // 主题色令牌：同一套 QSS 在深浅主题下取同一基色的不同明度。
     const QColor main = accentFor(isDark);
     out.replace(QStringLiteral("@ACCENT_RGB@"), rgbTriplet(main));
@@ -132,10 +159,10 @@ QString ThemeManager::defaultAccentHex() {
 }
 
 FolderTreeColors ThemeManager::folderTreeColors() {
-    // drawBranches 每行都会取一次颜色；静态构造，避免逐行解析颜色字符串。
-    static const FolderTreeColors dark{QColor(kTreeHoverDark), QColor(kTreeSelectedDark)};
-    static const FolderTreeColors light{QColor(kTreeHoverLight), QColor(kTreeSelectedLight)};
-    return s_darkTheme ? dark : light;
+    // 跟随主题色：每行自绘时取一次；QColor 构造开销极小，直接按当前主题色派生。
+    return s_darkTheme
+        ? FolderTreeColors{treeHoverColor(true), treeSelectedColor(true)}
+        : FolderTreeColors{treeHoverColor(false), treeSelectedColor(false)};
 }
 
 HexViewColors ThemeManager::hexViewColors(bool isDark) {
@@ -289,6 +316,30 @@ QString ThemeManager::getStyleSheet(bool isDark) {
             }
             QToolButton:pressed {
                 background-color: rgba(@ACCENT_RGB@, 0.2);
+            }
+            /* 下拉按钮（MenuButtonPopup）：全局 QSS 一旦接管 QToolButton，
+               ::menu-button/::menu-arrow 子控件不会回退原生外观，箭头区会被画成
+               色块且与图标重叠；这里显式透明化子按钮、预留右侧空间并自绘 chevron。 */
+            QToolButton[popupMode="1"] {
+                padding-right: 15px;
+            }
+            QToolButton::menu-button {
+                background-color: transparent;
+                border: none;
+                border-radius: 3px;
+                width: 14px;
+                padding: 0px;
+            }
+            QToolButton::menu-button:hover {
+                background-color: rgba(255, 255, 255, 0.08);
+            }
+            QToolButton::menu-button:pressed, QToolButton::menu-button:open {
+                background-color: rgba(@ACCENT_RGB@, 0.22);
+            }
+            QToolButton::menu-arrow {
+                image: @MENU_ARROW_IMAGE@;
+                width: 8px;
+                height: 8px;
             }
             QToolBar::separator {
                 width: 1px;
@@ -622,6 +673,28 @@ QString ThemeManager::getStyleSheet(bool isDark) {
             }
             QToolButton:pressed {
                 background-color: rgba(@ACCENT_RGB@, 0.15);
+            }
+            /* 下拉按钮（MenuButtonPopup）：同深色一套，箭头子控件显式透明化。 */
+            QToolButton[popupMode="1"] {
+                padding-right: 15px;
+            }
+            QToolButton::menu-button {
+                background-color: transparent;
+                border: none;
+                border-radius: 3px;
+                width: 14px;
+                padding: 0px;
+            }
+            QToolButton::menu-button:hover {
+                background-color: rgba(0, 0, 0, 0.06);
+            }
+            QToolButton::menu-button:pressed, QToolButton::menu-button:open {
+                background-color: rgba(@ACCENT_RGB@, 0.14);
+            }
+            QToolButton::menu-arrow {
+                image: @MENU_ARROW_IMAGE@;
+                width: 8px;
+                height: 8px;
             }
             QToolBar::separator {
                 width: 1px;

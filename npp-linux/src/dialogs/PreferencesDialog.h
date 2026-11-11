@@ -57,6 +57,8 @@ struct AppPreferences {
     bool showIndentGuides{false};            // 显示缩进参考线
     bool showWhitespace{false};              // 显示空格与制表符符号
     bool showEOL{false};                     // 显示换行符符号
+    bool showNpc{false};                     // 显示非打印字符
+    bool showCcUniEol{false};                // 显示控制字符和 Unicode 换行符
 
     // 2. 编辑器 -> 字体
     QString fontName{"Monospace"};           // 字体

@@ -2,6 +2,8 @@
 <qresource prefix="/toolbar/dark">
     <file alias="binary_16.png">icons/toolbar/dark/binary_16.png</file>
     <file alias="binary_32.png">icons/toolbar/dark/binary_32.png</file>
+    <file alias="chevron-down_16.png">icons/toolbar/dark/chevron-down_16.png</file>
+    <file alias="chevron-down_32.png">icons/toolbar/dark/chevron-down_32.png</file>
     <file alias="clipboard-paste_16.png">icons/toolbar/dark/clipboard-paste_16.png</file>
     <file alias="clipboard-paste_32.png">icons/toolbar/dark/clipboard-paste_32.png</file>
     <file alias="copy_16.png">icons/toolbar/dark/copy_16.png</file>
@@ -52,6 +54,8 @@
 <qresource prefix="/toolbar/light">
     <file alias="binary_16.png">icons/toolbar/light/binary_16.png</file>
     <file alias="binary_32.png">icons/toolbar/light/binary_32.png</file>
+    <file alias="chevron-down_16.png">icons/toolbar/light/chevron-down_16.png</file>
+    <file alias="chevron-down_32.png">icons/toolbar/light/chevron-down_32.png</file>
     <file alias="clipboard-paste_16.png">icons/toolbar/light/clipboard-paste_16.png</file>
     <file alias="clipboard-paste_32.png">icons/toolbar/light/clipboard-paste_32.png</file>
     <file alias="copy_16.png">icons/toolbar/light/copy_16.png</file>

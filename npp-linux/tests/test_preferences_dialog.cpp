@@ -686,3 +686,43 @@ void TestPreferencesDialog::defaultAccentKeepsOriginalPalette()
     QVERIFY2(!dark.contains(QStringLiteral("@ACCENT")) && !light.contains(QStringLiteral("@ACCENT")),
              "占位符必须全部落地");
 }
+
+void TestPreferencesDialog::treeSelectionFollowsAccentColor()
+{
+    const QColor original = ThemeManager::accentColor();
+
+    // 选一个非紫主题色（翠绿）并应用，确保 s_darkTheme 也被置位以便取对应套色。
+    ThemeManager::setAccentColor(QColor(QStringLiteral("#26A269")));
+    ThemeManager::applyTheme(false); // 浅色
+
+    const QString light = ThemeManager::getStyleSheet(false);
+    const QColor lightSel = ThemeManager::folderTreeColors().selected;
+    const QColor lightHover = ThemeManager::folderTreeColors().hover;
+
+    // 浅色令牌不再写死紫色 #ddd3f5 / #f0edf8。
+    QVERIFY2(!light.contains(QStringLiteral("background-color: #ddd3f5")),
+             "浅色树选中底色不应写死紫色");
+    // 自绘值与 QSS 落地值一致，且确实跟随到了绿主题色（绿分量领先）。
+    QVERIFY2(light.contains(QStringLiteral("background-color: ") + lightSel.name()),
+             "浅色 QSS 树选中底色必须与 folderTreeColors 自绘值一致");
+    QVERIFY2(lightSel.green() > lightSel.red() && lightSel.green() > lightSel.blue(),
+             "浅色树选中底色应跟随主题色（此处为绿）而非紫色系");
+    QVERIFY2(lightHover.green() > lightHover.red() && lightHover.green() > lightHover.blue(),
+             "浅色树 hover 底色应跟随主题色而非紫色系");
+
+    ThemeManager::applyTheme(true); // 深色
+    const QString dark = ThemeManager::getStyleSheet(true);
+    const QColor darkSel = ThemeManager::folderTreeColors().selected;
+
+    QVERIFY2(!dark.contains(QStringLiteral("background-color: #3d3550")),
+             "深色树选中底色不应写死紫色");
+    QVERIFY2(dark.contains(QStringLiteral("background-color: ") + darkSel.name()),
+             "深色 QSS 树选中底色必须与 folderTreeColors 自绘值一致");
+    // 深色选中仍偏暗（蓝绿分量领先、整體偏暗），不再紫色系。
+    QVERIFY2(darkSel.green() >= darkSel.red() && darkSel.blue() >= darkSel.red(),
+             "深色树选中底色应跟随主题色（此处为绿）而非紫色系");
+
+    // 恢复全局状态，避免影响后续用例
+    ThemeManager::setAccentColor(original);
+    ThemeManager::applyTheme(false);
+}

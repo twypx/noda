@@ -27,6 +27,98 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+namespace {
+
+// 不可见字符缩写表（复刻 上游 ScintillaEditView.cpp 的 g_nonPrintingChars /
+// g_ccUniEolChars）：NPC 开关管第一张，CcUniEOL 开关管第二张，均以 UTF-8
+// 编码串为键、缩写为 SCI_SETREPRESENTATION 的表示文本。
+struct InvisibleCharRep {
+    const char* encoded;
+    const char* abbreviation;
+};
+
+// 非打印字符（零宽/双向/不可见空白等，49 项）。
+constexpr InvisibleCharRep kNonPrintingChars[] = {
+    {"\xC2\xA0", "NBSP"},          // U+00A0 : no-break space
+    {"\xC2\xAD", "SHY"},           // U+00AD : soft hyphen
+    {"\xD8\x9C", "ALM"},           // U+061C : arabic letter mark
+    {"\xDC\x8F", "SAM"},           // U+070F : syriac abbreviation mark
+    {"\xE1\x9A\x80", "OSPM"},      // U+1680 : ogham space mark
+    {"\xE1\xA0\x8E", "MVS"},       // U+180E : mongolian vowel separator
+    {"\xE2\x80\x80", "NQSP"},      // U+2000 : en quad
+    {"\xE2\x80\x81", "MQSP"},      // U+2001 : em quad
+    {"\xE2\x80\x82", "ENSP"},      // U+2002 : en space
+    {"\xE2\x80\x83", "EMSP"},      // U+2003 : em space
+    {"\xE2\x80\x84", "3/MSP"},     // U+2004 : three-per-em space
+    {"\xE2\x80\x85", "4/MSP"},     // U+2005 : four-per-em space
+    {"\xE2\x80\x86", "6/MSP"},     // U+2006 : six-per-em space
+    {"\xE2\x80\x87", "FSP"},       // U+2007 : figure space
+    {"\xE2\x80\x88", "PSP"},       // U+2008 : punctuation space
+    {"\xE2\x80\x89", "THSP"},      // U+2009 : thin space
+    {"\xE2\x80\x8A", "HSP"},       // U+200A : hair space
+    {"\xE2\x80\x8B", "ZWSP"},      // U+200B : zero-width space
+    {"\xE2\x80\x8C", "ZWNJ"},      // U+200C : zero-width non-joiner
+    {"\xE2\x80\x8D", "ZWJ"},       // U+200D : zero-width joiner
+    {"\xE2\x80\x8E", "LRM"},       // U+200E : left-to-right mark
+    {"\xE2\x80\x8F", "RLM"},       // U+200F : right-to-left mark
+    {"\xE2\x80\xAA", "LRE"},       // U+202A : left-to-right embedding
+    {"\xE2\x80\xAB", "RLE"},       // U+202B : right-to-left embedding
+    {"\xE2\x80\xAC", "PDF"},       // U+202C : pop directional formatting
+    {"\xE2\x80\xAD", "LRO"},       // U+202D : left-to-right override
+    {"\xE2\x80\xAE", "RLO"},       // U+202E : right-to-left override
+    {"\xE2\x80\xAF", "NNBSP"},     // U+202F : narrow no-break space
+    {"\xE2\x81\x9F", "MMSP"},      // U+205F : medium mathematical space
+    {"\xE2\x81\xA0", "WJ"},        // U+2060 : word joiner
+    {"\xE2\x81\xA1", "(FA)"},      // U+2061 : function application
+    {"\xE2\x81\xA2", "(IT)"},      // U+2062 : invisible times
+    {"\xE2\x81\xA3", "(IS)"},      // U+2063 : invisible separator
+    {"\xE2\x81\xA4", "(IP)"},      // U+2064 : invisible plus
+    {"\xE2\x81\xA6", "LRI"},       // U+2066 : left-to-right isolate
+    {"\xE2\x81\xA7", "RLI"},       // U+2067 : right-to-left isolate
+    {"\xE2\x81\xA8", "FSI"},       // U+2068 : first strong isolate
+    {"\xE2\x81\xA9", "PDI"},       // U+2069 : pop directional isolate
+    {"\xE2\x81\xAA", "ISS"},       // U+206A : inhibit symmetric swapping
+    {"\xE2\x81\xAB", "ASS"},       // U+206B : activate symmetric swapping
+    {"\xE2\x81\xAC", "IAFS"},      // U+206C : inhibit arabic form shaping
+    {"\xE2\x81\xAD", "AAFS"},      // U+206D : activate arabic form shaping
+    {"\xE2\x81\xAE", "NADS"},      // U+206E : national digit shapes
+    {"\xE2\x81\xAF", "NODS"},      // U+206F : nominal digit shapes
+    {"\xE3\x80\x80", "IDSP"},      // U+3000 : ideographic space
+    {"\xEF\xBB\xBF", "ZWNBSP"},    // U+FEFF : zero-width no-break space
+    {"\xEF\xBF\xB9", "IAA"},       // U+FFF9 : interlinear annotation anchor
+    {"\xEF\xBF\xBA", "IAS"},       // U+FFFA : interlinear annotation separator
+    {"\xEF\xBF\xBB", "IAT"},       // U+FFFB : interlinear annotation terminator
+};
+
+// C0/C1 控制字符与 Unicode 换行符（64 项）。
+constexpr InvisibleCharRep kCcUniEolChars[] = {
+    {"\x00", "NUL"}, {"\x01", "SOH"}, {"\x02", "STX"}, {"\x03", "ETX"},
+    {"\x04", "EOT"}, {"\x05", "ENQ"}, {"\x06", "ACK"}, {"\a", "BEL"},
+    {"\b", "BS"},    {"\v", "VT"},    {"\f", "FF"},
+    {"\x0E", "SO"},  {"\x0F", "SI"},  {"\x10", "DLE"}, {"\x11", "DC1"},
+    {"\x12", "DC2"}, {"\x13", "DC3"}, {"\x14", "DC4"}, {"\x15", "NAK"},
+    {"\x16", "SYN"}, {"\x17", "ETB"}, {"\x18", "CAN"}, {"\x19", "EM"},
+    {"\x1A", "SUB"}, {"\x1B", "ESC"}, {"\x1C", "FS"},  {"\x1D", "GS"},
+    {"\x1E", "RS"},  {"\x1F", "US"},  {"\x7F", "DEL"},
+    {"\xC2\x80", "PAD"}, {"\xC2\x81", "HOP"}, {"\xC2\x82", "BPH"},
+    {"\xC2\x83", "NBH"}, {"\xC2\x84", "IND"}, {"\xC2\x86", "SSA"},
+    {"\xC2\x87", "ESA"}, {"\xC2\x88", "HTS"}, {"\xC2\x89", "HTJ"},
+    {"\xC2\x8A", "VTS"}, {"\xC2\x8B", "PLD"}, {"\xC2\x8C", "PLU"},
+    {"\xC2\x8D", "RI"},  {"\xC2\x8E", "SS2"}, {"\xC2\x8F", "SS3"},
+    {"\xC2\x90", "DCS"}, {"\xC2\x91", "PU1"}, {"\xC2\x92", "PU2"},
+    {"\xC2\x93", "STS"}, {"\xC2\x94", "CCH"}, {"\xC2\x95", "MW"},
+    {"\xC2\x96", "SPA"}, {"\xC2\x97", "EPA"}, {"\xC2\x98", "SOS"},
+    {"\xC2\x99", "SGCI"}, {"\xC2\x9A", "SCI"}, {"\xC2\x9B", "CSI"},
+    {"\xC2\x9C", "ST"},  {"\xC2\x9D", "OSC"}, {"\xC2\x9E", "PM"},
+    {"\xC2\x9F", "APC"},
+    {"\xC2\x85", "NEL"},        // U+0085 : next line
+    {"\xE2\x80\xA8", "LS"},     // U+2028 : line separator
+    {"\xE2\x80\xA9", "PS"},     // U+2029 : paragraph separator
+};
+
+}   // namespace
+
+
 EditorView::EditorView(QWidget* parent)
     : ScintillaEditBase(parent)
     , _buffer(std::make_shared<DocumentBuffer>())
@@ -2621,6 +2713,35 @@ void EditorView::setShowEOL(bool show) {
 
 void EditorView::setShowIndentGuides(bool show) {
     send(SCI_SETINDENTATIONGUIDES, show ? SC_IV_LOOKBOTH : SC_IV_NONE);
+}
+
+void EditorView::setShowNpc(bool show) {
+    _showNpc = show;
+    applyInvisibleCharRepresentations();
+}
+
+void EditorView::setShowCcUniEol(bool show) {
+    _showCcUniEol = show;
+    applyInvisibleCharRepresentations();
+}
+
+void EditorView::applyInvisibleCharRepresentations() {
+    // NPC 与 CcUniEOL 共用同一张表示表：SCI_CLEARALLREPRESENTATIONS 会连对方
+    // 一起清掉（同 上游 showNpc()/showCcUniEol() 互相重放），所以这里统一
+    // “清空 + 按两个开关的当前状态合成重放”，顺序无关、无隐藏耦合。
+    send(SCI_CLEARALLREPRESENTATIONS);
+    if (_showNpc) {
+        for (const auto& ch : kNonPrintingChars) {
+            send(SCI_SETREPRESENTATION, reinterpret_cast<uptr_t>(ch.encoded),
+                 reinterpret_cast<sptr_t>(ch.abbreviation));
+        }
+    }
+    if (_showCcUniEol) {
+        for (const auto& ch : kCcUniEolChars) {
+            send(SCI_SETREPRESENTATION, reinterpret_cast<uptr_t>(ch.encoded),
+                 reinterpret_cast<sptr_t>(ch.abbreviation));
+        }
+    }
 }
 
 void EditorView::setWrapMode(bool wrap) {

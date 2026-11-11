@@ -15,6 +15,7 @@
 #include <QToolButton>
 #include "widgets/DiffMiniMap.h"
 #include "utils/ConfigMigration.h"
+#include "utils/ThemeManager.h"
 
 void TestDiffEngine::identicalTextYieldsNoDiff()
 {
@@ -810,8 +811,9 @@ void TestDiffEngine::toolbarDropdownsAndFileCompareEntry()
     QVERIFY(showAllBtn != nullptr);
     QCOMPARE(showAllBtn->popupMode(), QToolButton::MenuButtonPopup);
     QVERIFY(showAllBtn->menu() != nullptr);
-    // 显示空格与制表符 / 显示换行符 / 显示缩进参考线 / 分隔符 / 显示所有字符
-    QCOMPARE(showAllBtn->menu()->actions().size(), 5);
+    // 显示空格与制表符 / 显示换行符 / 显示非打印字符 / 显示控制字符和 Unicode 换行符
+    // / 分隔符 / 显示所有字符（P.7.11 起对齐上游）
+    QCOMPARE(showAllBtn->menu()->actions().size(), 6);
     QVERIFY(showAllBtn->menu()->actions().contains(win.findChild<QAction*>("actShowWhitespace")));
     // 下拉复用主菜单的 QAction，点击后仍走原槽并翻转勾选态。
     auto* showWs = win.findChild<QAction*>("actShowWhitespace");
@@ -855,4 +857,128 @@ void TestDiffEngine::compareWithSelectedFileUsesCurrentDocument()
     // 原标签页内容未被改动
     QCOMPARE(QString::fromStdString(ed->currentTextUtf8()),
              QStringLiteral("head\nCURRENT\ntail\n"));
+}
+
+// P.7.11：「显示所有字符」下拉对齐上游 NppBigSwitch.cpp:2366 的下拉清单
+// （IDM_VIEW_TAB_SPACE / EOL / NPC / NPC_CCUNIEOL | 分隔 | ALL_CHARACTERS）。
+void TestDiffEngine::showSymbolDropdownMatchesUpstream()
+{
+    MainWindow win;
+    win.show();
+
+    auto* showAllBtn = win.findChild<QToolButton*>("toolShowAllCharsButton");
+    QVERIFY(showAllBtn != nullptr);
+    QVERIFY(showAllBtn->menu() != nullptr);
+    const auto acts = showAllBtn->menu()->actions();
+    // 显示空格与制表符 / 显示换行符 / 显示非打印字符 / 显示控制字符和 Unicode 换行符 | 分隔 | 显示所有字符
+    QCOMPARE(acts.size(), 6);
+    QVERIFY(acts.at(4)->isSeparator());
+    QVERIFY(!acts.at(0)->isSeparator() && !acts.at(3)->isSeparator());
+    const char* order[] = {"actShowWhitespace", "actShowEol", "actShowNpc",
+                           "actShowCcUniEol", nullptr, "actShowAll"};
+    for (int i = 0; i < 6; ++i) {
+        if (!order[i]) continue;
+        QVERIFY2(acts.at(i) == win.findChild<QAction*>(QString::fromLatin1(order[i])),
+                 order[i]);
+    }
+    // 缩进参考线退回「显示符号」子菜单，不再出现在下拉里。
+    auto* guides = win.findChild<QAction*>("actShowIndentGuides");
+    QVERIFY(guides != nullptr);
+    QVERIFY2(!acts.contains(guides), "下拉不应再包含缩进参考线");
+    QVERIFY(win.findChild<QAction*>("actShowNpc") != nullptr);
+    QVERIFY(win.findChild<QAction*>("actShowCcUniEol") != nullptr);
+}
+
+// NPC / CcUniEOL 基于 SCI_SETREPRESENTATION；两开关共享一张表示表，必须合成重放。
+void TestDiffEngine::npcAndCcUniEolTogglesSetRepresentations()
+{
+    MainWindow win;
+    win.show();
+    auto* tabMgr = win.findChild<TabManager*>();
+    QVERIFY(tabMgr != nullptr);
+    tabMgr->createNewTab();
+    auto* ed = tabMgr->currentEditor();
+    QVERIFY(ed != nullptr);
+    // ZWSP（U+200B，NPC 表）作正向判据；C1 的 CSI（U+009B）作合成判据。
+    // 注意：Scintilla 默认表示表就是缩写助记（"ESC"/"CSI"/"LS"...），CcUniEOL 的
+    // 缩写重放与默认值一致（同 上游 npcMode=abbreviation），因此 CcUniEOL 的开关
+    // 效果体现在“重放后默认表不丢、NPC 表示不被冲掉”，而非改变 CSI 的表示文本。
+    ed->setTextFromUtf8(std::string("a\xE2\x80\x8B\xC2\x9Bb\n"));
+
+    const char zwsp[] = "\xE2\x80\x8B";
+    const char csi[] = "\xC2\x9B";
+    auto repLength = [ed](const char* ch) {
+        char buf[64] = {};
+        return static_cast<int>(ed->send(SCI_GETREPRESENTATION,
+                reinterpret_cast<uptr_t>(ch), reinterpret_cast<sptr_t>(buf)));
+    };
+
+    auto* actNpc = win.findChild<QAction*>("actShowNpc");
+    auto* actCc = win.findChild<QAction*>("actShowCcUniEol");
+    auto* actAll = win.findChild<QAction*>("actShowAll");
+    QVERIFY(actNpc != nullptr && actCc != nullptr && actAll != nullptr);
+    QVERIFY(!actNpc->isChecked() && !actCc->isChecked() && !actAll->isChecked());
+    QCOMPARE(repLength(zwsp), 0);
+    QCOMPARE(repLength(csi), 3);   // 默认助记 "CSI"
+
+    // 只开 NPC：ZWSP 有缩写表示，C1 默认助记不受影响。
+    actNpc->trigger();
+    QVERIFY(actNpc->isChecked());
+    QVERIFY(repLength(zwsp) > 0);
+    QCOMPARE(repLength(csi), 3);
+
+    // 再开 CcUniEOL：CLEARALL 重置后按两开关状态重放，NPC 表示不被冲掉。
+    actCc->trigger();
+    QVERIFY(actCc->isChecked());
+    QVERIFY(repLength(zwsp) > 0);
+    QCOMPARE(repLength(csi), 3);
+
+    // 关掉 CcUniEOL：重放后 NPC 保持。
+    actCc->trigger();
+    QVERIFY(!actCc->isChecked());
+    QVERIFY(repLength(zwsp) > 0);
+    QCOMPARE(repLength(csi), 3);
+
+    // 关掉 NPC：全部复位。
+    actNpc->trigger();
+    QCOMPARE(repLength(zwsp), 0);
+    QCOMPARE(repLength(csi), 3);
+
+    // 总开关：四项（空格/EOL/NPC/CcUniEOL）全开；再点全部关闭。
+    actAll->trigger();
+    QVERIFY(actAll->isChecked());
+    QVERIFY(win.findChild<QAction*>("actShowWhitespace")->isChecked());
+    QVERIFY(win.findChild<QAction*>("actShowEol")->isChecked());
+    QVERIFY(actNpc->isChecked() && actCc->isChecked());
+    QVERIFY(repLength(zwsp) > 0);
+    QCOMPARE(repLength(csi), 3);
+    actAll->trigger();
+    QVERIFY(!actAll->isChecked());
+    QVERIFY(!actNpc->isChecked() && !actCc->isChecked());
+    QCOMPARE(repLength(zwsp), 0);
+    QCOMPARE(repLength(csi), 3);
+}
+
+// 下拉箭头区样式：chevron 资源内嵌 + QSS 显式接管 ::menu-button / ::menu-arrow。
+void TestDiffEngine::dropdownMenuButtonStyled()
+{
+    QVERIFY(QFile::exists(QStringLiteral(":/toolbar/dark/chevron-down_16.png")));
+    QVERIFY(QFile::exists(QStringLiteral(":/toolbar/dark/chevron-down_32.png")));
+    QVERIFY(QFile::exists(QStringLiteral(":/toolbar/light/chevron-down_16.png")));
+    QVERIFY(QFile::exists(QStringLiteral(":/toolbar/light/chevron-down_32.png")));
+
+    const QString darkCss = ThemeManager::getStyleSheet(true);
+    const QString lightCss = ThemeManager::getStyleSheet(false);
+    for (const QString& css : {darkCss, lightCss}) {
+        QVERIFY2(css.contains(QStringLiteral("QToolButton[popupMode=\"1\"]")),
+                 "必须为下拉按钮预留箭头空间，否则箭头与图标重叠");
+        QVERIFY2(css.contains(QStringLiteral("QToolButton::menu-button")),
+                 "下拉子按钮必须显式透明化，否则渲染成色块");
+        QVERIFY2(css.contains(QStringLiteral("QToolButton::menu-arrow")),
+                 "箭头必须自绘，与深浅主题前景色一致");
+        QVERIFY2(css.contains(QStringLiteral("chevron-down")),
+                 "箭头图必须随深浅主题切换");
+        QVERIFY2(!css.contains(QStringLiteral("@MENU_ARROW")),
+                 "箭头占位符必须全部落地");
+    }
 }

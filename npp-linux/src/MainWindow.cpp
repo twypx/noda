@@ -481,18 +481,33 @@ void MainWindow::setupViewMenu() {
     _actShowWs->setObjectName("actShowWhitespace");
     _actShowWs->setCheckable(true);
     _actShowEol = symMenu->addAction("显示换行符", this, &MainWindow::onToggleShowEOL);
+    _actShowEol->setObjectName("actShowEol");
     _actShowEol->setCheckable(true);
+    _actShowNpc = symMenu->addAction("显示非打印字符", this, &MainWindow::onToggleShowNpc);
+    _actShowNpc->setObjectName("actShowNpc");
+    _actShowNpc->setCheckable(true);
+    _actShowCcUniEol = symMenu->addAction("显示控制字符和 Unicode 换行符", this, &MainWindow::onToggleShowCcUniEol);
+    _actShowCcUniEol->setObjectName("actShowCcUniEol");
+    _actShowCcUniEol->setCheckable(true);
     _actShowAll = symMenu->addAction("显示所有字符", this, &MainWindow::onToggleShowAllChars);
+    _actShowAll->setObjectName("actShowAll");
     _actShowAll->setCheckable(true);
     _actShowGuides = symMenu->addAction("显示缩进参考线", this, &MainWindow::onToggleShowIndentGuides);
+    _actShowGuides->setObjectName("actShowIndentGuides");
     _actShowGuides->setCheckable(true);
 
-    // "显示所有字符"是前两个开关的合体：单独改动任一个时，它只在两者都开时才保持勾选。
+    // "显示所有字符"是四个开关的合体（同 上游 NppCommands.cpp 的 allChecked）：
+    // 单独改动任一个时，它只在四者全开时才保持勾选。
     auto syncShowAll = [this]() {
-        if (_actShowAll) _actShowAll->setChecked(_actShowWs->isChecked() && _actShowEol->isChecked());
+        if (_actShowAll) {
+            _actShowAll->setChecked(_actShowWs->isChecked() && _actShowEol->isChecked()
+                                    && _actShowNpc->isChecked() && _actShowCcUniEol->isChecked());
+        }
     };
     connect(_actShowWs, &QAction::toggled, this, syncShowAll);
     connect(_actShowEol, &QAction::toggled, this, syncShowAll);
+    connect(_actShowNpc, &QAction::toggled, this, syncShowAll);
+    connect(_actShowCcUniEol, &QAction::toggled, this, syncShowAll);
 
     auto* zoomMenu = menu->addMenu("缩放");
     auto* zoomInAct = zoomMenu->addAction("放大(&I)", this, &MainWindow::onZoomIn);
@@ -788,12 +803,13 @@ void MainWindow::setupToolBar() {
         _toolActions.append(qMakePair(act, QString::fromLatin1(e.icon)));
     }
 
-    // 「显示所有字符」下拉（对应上游 IDM_VIEW_TAB_SPACE / EOL / ... / ALL_CHARACTERS，
-    // 本项目没有 NPC 相关两项，改放缩进参考线），末尾分隔符后是总开关。
+    // 「显示所有字符」下拉（对应上游 IDM_VIEW_TAB_SPACE / EOL / NPC / NPC_CCUNIEOL
+    // / ALL_CHARACTERS），末尾分隔符后是总开关；缩进参考线只保留在「显示符号」子菜单。
     auto* symbolDropdown = new QMenu(_toolBar);
     symbolDropdown->addAction(_actShowWs);
     symbolDropdown->addAction(_actShowEol);
-    symbolDropdown->addAction(_actShowGuides);
+    symbolDropdown->addAction(_actShowNpc);
+    symbolDropdown->addAction(_actShowCcUniEol);
     symbolDropdown->addSeparator();
     symbolDropdown->addAction(_actShowAll);
 
@@ -1750,17 +1766,35 @@ void MainWindow::onToggleShowEOL(bool show) {
     savePreferences();
 }
 
+void MainWindow::onToggleShowNpc(bool show) {
+    _prefs.showNpc = show;
+    forEachEditor([show](EditorView* ed) { ed->setShowNpc(show); });
+    savePreferences();
+}
+
+void MainWindow::onToggleShowCcUniEol(bool show) {
+    _prefs.showCcUniEol = show;
+    forEachEditor([show](EditorView* ed) { ed->setShowCcUniEol(show); });
+    savePreferences();
+}
+
 void MainWindow::onToggleShowAllChars(bool show) {
-    // “显示所有字符”是前两个开关的合体（与 上游 一致）。
+    // “显示所有字符”是四个开关的合体（与 上游 showInvisibleChars() 一致）。
     // 注意 setChecked() 只发射 toggled、不发射 triggered，而渲染逻辑是挂在 triggered 上的，
-    // 所以不能指望两个分量开关替我们把命令发出去，必须在这里自己应用一遍。
+    // 所以不能指望四个分量开关替我们把命令发出去，必须在这里自己应用一遍。
     if (_actShowWs) _actShowWs->setChecked(show);
     if (_actShowEol) _actShowEol->setChecked(show);
+    if (_actShowNpc) _actShowNpc->setChecked(show);
+    if (_actShowCcUniEol) _actShowCcUniEol->setChecked(show);
     _prefs.showWhitespace = show;
     _prefs.showEOL = show;
+    _prefs.showNpc = show;
+    _prefs.showCcUniEol = show;
     forEachEditor([show](EditorView* ed) {
         ed->setShowWhitespace(show);
         ed->setShowEOL(show);
+        ed->setShowNpc(show);
+        ed->setShowCcUniEol(show);
     });
     savePreferences();
 }
@@ -2343,13 +2377,20 @@ void MainWindow::applyPreferences(const AppPreferences& prefs, bool force) {
         _actShowWs->setChecked(prefs.showWhitespace);
     if (_actShowEol && (force || old.showEOL != prefs.showEOL))
         _actShowEol->setChecked(prefs.showEOL);
+    if (_actShowNpc && (force || old.showNpc != prefs.showNpc))
+        _actShowNpc->setChecked(prefs.showNpc);
+    if (_actShowCcUniEol && (force || old.showCcUniEol != prefs.showCcUniEol))
+        _actShowCcUniEol->setChecked(prefs.showCcUniEol);
     if (_actShowGuides && (force || old.showIndentGuides != prefs.showIndentGuides))
         _actShowGuides->setChecked(prefs.showIndentGuides);
-    // 合体项的勾选由 syncShowAll 在分量开关的 toggled 里推导，但两个分量都没变化时
+    // 合体项的勾选由 syncShowAll 在分量开关的 toggled 里推导，但分量都没变化时
     // toggled 不会发射，所以这里显式算一次，避免从配置文件恢复时漏掉。
     if (_actShowAll && (force || old.showWhitespace != prefs.showWhitespace
-                        || old.showEOL != prefs.showEOL)) {
-        _actShowAll->setChecked(prefs.showWhitespace && prefs.showEOL);
+                        || old.showEOL != prefs.showEOL
+                        || old.showNpc != prefs.showNpc
+                        || old.showCcUniEol != prefs.showCcUniEol)) {
+        _actShowAll->setChecked(prefs.showWhitespace && prefs.showEOL
+                                && prefs.showNpc && prefs.showCcUniEol);
     }
 
     const bool themeChanged = force || old.themeName != prefs.themeName;
@@ -2361,6 +2402,7 @@ void MainWindow::applyPreferences(const AppPreferences& prefs, bool force) {
         || old.showFoldMargin != prefs.showFoldMargin
         || old.showIndentGuides != prefs.showIndentGuides
         || old.showWhitespace != prefs.showWhitespace || old.showEOL != prefs.showEOL
+        || old.showNpc != prefs.showNpc || old.showCcUniEol != prefs.showCcUniEol
         || old.fontName != prefs.fontName || old.fontSize != prefs.fontSize
         || old.fontSmooth != prefs.fontSmooth || old.darkMode != prefs.darkMode
         || old.highlightMatchingWords != prefs.highlightMatchingWords
@@ -2415,6 +2457,8 @@ void MainWindow::applyPreferencesToEditor(EditorView* ed) {
     ed->setShowIndentGuides(_prefs.showIndentGuides);
     ed->setShowWhitespace(_prefs.showWhitespace);
     ed->setShowEOL(_prefs.showEOL);
+    ed->setShowNpc(_prefs.showNpc);
+    ed->setShowCcUniEol(_prefs.showCcUniEol);
     ed->setDarkMode(_prefs.darkMode);
     ed->setHighlightPrefs(_prefs.highlightMatchingWords, _prefs.highlightMatchingBraces,
                           _prefs.highlightMatchCase, _prefs.highlightMatchWholeWord);
@@ -2454,6 +2498,8 @@ void MainWindow::loadPreferences() {
     _prefs.showIndentGuides = s.value("prefs/showIndentGuides", false).toBool();
     _prefs.showWhitespace = s.value("prefs/showWhitespace", false).toBool();
     _prefs.showEOL = s.value("prefs/showEOL", false).toBool();
+    _prefs.showNpc = s.value("prefs/showNpc", false).toBool();
+    _prefs.showCcUniEol = s.value("prefs/showCcUniEol", false).toBool();
 
     _prefs.fontName = s.value("prefs/fontName", "Monospace").toString();
     _prefs.fontSize = s.value("prefs/fontSize", 10).toInt();
@@ -2509,6 +2555,8 @@ void MainWindow::savePreferences() {
     s.setValue("prefs/showIndentGuides", _prefs.showIndentGuides);
     s.setValue("prefs/showWhitespace", _prefs.showWhitespace);
     s.setValue("prefs/showEOL", _prefs.showEOL);
+    s.setValue("prefs/showNpc", _prefs.showNpc);
+    s.setValue("prefs/showCcUniEol", _prefs.showCcUniEol);
 
     s.setValue("prefs/fontName", _prefs.fontName);
     s.setValue("prefs/fontSize", _prefs.fontSize);

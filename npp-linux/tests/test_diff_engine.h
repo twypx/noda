@@ -38,4 +38,7 @@ private slots:
     void compareMenuIsGroupedAndToolbarHasNavigationButtons();
     void toolbarDropdownsAndFileCompareEntry();
     void compareWithSelectedFileUsesCurrentDocument();
+    void showSymbolDropdownMatchesUpstream();
+    void npcAndCcUniEolTogglesSetRepresentations();
+    void dropdownMenuButtonStyled();
 };
