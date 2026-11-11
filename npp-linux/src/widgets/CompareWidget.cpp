@@ -2,6 +2,7 @@
 #include "EditorView.h"
 
 #include <QCheckBox>
+#include <QPushButton>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QScrollBar>
@@ -48,6 +49,20 @@ CompareWidget::CompareWidget(EditorView* editorA, EditorView* editorB, bool isDa
     optionsLayout->addWidget(_ignoreWhitespaceCheck);
     optionsLayout->addWidget(_ignoreCaseCheck);
     optionsLayout->addStretch(1);
+
+    // 差异导航与退出按钮只属于比对视图，随 CompareWidget 一起创建/销毁，
+    // 因此「只有进入比对模式后才出现」由控件生命周期天然保证。
+    _nextDiffButton = new QPushButton(tr("下一个差异"), optionsBar);
+    _nextDiffButton->setObjectName("btnNextDiff");
+    _nextDiffButton->setEnabled(false);
+    _prevDiffButton = new QPushButton(tr("上一个差异"), optionsBar);
+    _prevDiffButton->setObjectName("btnPrevDiff");
+    _prevDiffButton->setEnabled(false);
+    _closeCompareButton = new QPushButton(tr("关闭对比"), optionsBar);
+    _closeCompareButton->setObjectName("btnCloseCompare");
+    optionsLayout->addWidget(_nextDiffButton);
+    optionsLayout->addWidget(_prevDiffButton);
+    optionsLayout->addWidget(_closeCompareButton);
     mainColumn->addWidget(optionsBar);
 
     _splitter = new QSplitter(Qt::Horizontal, this);
@@ -74,6 +89,11 @@ CompareWidget::CompareWidget(EditorView* editorA, EditorView* editorB, bool isDa
     connect(_ignoreCaseCheck, &QCheckBox::toggled, this, [this](bool checked) {
         _options.ignoreCase = checked;
         refreshDiff();
+    });
+    connect(_nextDiffButton, &QPushButton::clicked, this, [this]() { nextDiff(); });
+    connect(_prevDiffButton, &QPushButton::clicked, this, [this]() { prevDiff(); });
+    connect(_closeCompareButton, &QPushButton::clicked, this, [this]() {
+        emit closeCompareRequested();
     });
 
     setupScintillaStyles(_editorA);
@@ -217,6 +237,11 @@ void CompareWidget::publishResult(Diff::DiffResult result)
 
     applyDiffVisuals();
     _miniMap->setAlignment(_alignment);
+
+    // 无差异时禁用导航按钮；异步比对完成后同样会走到这里刷新状态。
+    const bool hasDiff = !_diffLineIndices.empty();
+    _nextDiffButton->setEnabled(hasDiff);
+    _prevDiffButton->setEnabled(hasDiff);
 
     if (!_diffLineIndices.empty()) {
         _currentDiffIndex = 0;

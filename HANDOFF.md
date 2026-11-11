@@ -103,6 +103,10 @@ v1.0.7 / v1.0.8 已提交：拖拽文件到窗口打开、透明抠图图标重�
 
 模块 P（文件比对，尚未提交）：原实现存在 O(D²) 内存、抢占 TabManager 页面、行内差异只算前后缀等问题；已整改为 Histogram 锚点 + 有界 Myers、字符级行内 diff、`currentTextView()` 零拷贝、独立只读副本比对、16MB 护栏，并新增忽略空白/大小写选项。详见 `docs/开发计划2.md` 模块 P.6。
 
+模块 P.7-MENU（比对菜单收敛与工具条按钮，尚未提交）：「视图」下新增子菜单「文件比对」，收纳 5 个入口（文件对比 / 比对选区 / Git HEAD / SVN BASE / 关闭对比）；`F8`、`Shift+F8` 改为窗口级快捷动作，不再占菜单。`CompareWidget` 的 optionsBar 右侧加入「下一个差异」「上一个差异」「关闭对比」三个按钮，随比对视图创建/销毁，故只在比对模式出现；通过新信号 `closeCompareRequested()` 通知 MainWindow 退出，无反向依赖。新增 `compareMenuIsGroupedAndToolbarHasNavigationButtons` 用例；双语文档同步。详见 `docs/开发计划2.md` P.7.8。
+
+模块 P.7-UI（工具栏比对按钮开关化，尚未提交）：「文件对比」工具栏按钮改为 checkable（深浅主题已有 `:checked` 紫色高亮），点击进入呈选中态、再次点击退出；`Ctrl+Alt+C` 同步为切换语义，`Ctrl+Alt+X` 仍可退出。状态同步集中在 `createCompareView()` / `onCloseCompare()`，菜单、选区、Git/SVN 等所有入口一致，被护栏拒绝时回滚未选中。tooltip 补齐英文词典。新增 `toolbarCompareButtonTogglesCompareMode` 用例；双语文档同步。详见 `docs/开发计划2.md` P.7.7。
+
 模块 P.7-CRASH（比对模式约 10 秒崩溃修复，尚未提交）：内核日志定位到 `libQt6Widgets +0x210bf4`（`QTabBar::count()`），gdb 复现栈为 `syncBackups()` ← `QTimer::timeout`（备份周期 7 秒）。根因是进入比对时 `setCentralWidget` 把旧的 `_tabManager` 排队删除，定时器随后访问悬空指针。已新增 `switchCentralWidget()` 用 `takeCentralWidget()` 取回所有权，并加 `QPointer` 哨兵保护定时器；新增 4 个生命周期回归用例（修复前红灯、修复后绿灯）。真实 APP + gdb 进入比对存活 26 秒无 SIGSEGV。详见 `docs/开发计划2.md` P.7.6。
 
 模块 P.7-CI（GitHub Actions 工作流失败修复，尚未提交）：`Build & Release` 报 `npp_tests` Failed / CTest exit 8，根因是 `langs.model.xml` / `stylers.model.xml` 原先只挂在 `noda` 的 `POST_BUILD` 复制，而 CI 的 `run_tests.sh` 只构建 `npp_tests`，干净构建目录缺这两个 XML，导致 8 个依赖 `loadRealConfigs()` 的用例失败（本地因曾构建过 `noda` 被掩盖）。已改为 `configure_file(... COPYONLY)` 在 configure 阶段落地，并在 `run_tests.sh` 增加 4 类资源前置校验；顺带把 `project(NotepadPlusPlus_Linux)` 改名为 `project(Noda)`。验证：干净构建目录 + CI 环境变量 + 仅构建 `npp_tests` → CTest 100%；`./tests/run_tests.sh` exit 0；`./build_deb.sh` 正常产出 deb。详见 `docs/开发计划2.md` P.7.5。

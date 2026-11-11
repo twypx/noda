@@ -9,6 +9,8 @@
 #include <QFile>
 #include <QTemporaryDir>
 #include <QPointer>
+#include <QMenu>
+#include <QPushButton>
 #include "widgets/DiffMiniMap.h"
 #include "utils/ConfigMigration.h"
 
@@ -659,5 +661,113 @@ void TestDiffEngine::compareModeKeepsTabManagerAlive()
     QVERIFY(actClear != nullptr);
     actClear->trigger();
     QVERIFY(!guard.isNull());
+    QCOMPARE(win.centralWidget(), static_cast<QWidget*>(tabMgr));
+}
+
+// 工具栏「文件对比」按钮为可切换开关：点击进入（选中态），再次点击退出比对。
+void TestDiffEngine::toolbarCompareButtonTogglesCompareMode()
+{
+    MainWindow win;
+    win.show();
+    auto* btn = win.findChild<QAction*>("toolCompareToggle");
+    QVERIFY(btn != nullptr);
+    QVERIFY(btn->isCheckable());
+    QVERIFY(!btn->isChecked());
+
+    auto* tabMgr = win.findChild<TabManager*>();
+    QVERIFY(tabMgr != nullptr);
+    QPointer<QWidget> guard(tabMgr);
+
+    // 标签页不足时进入被拒绝，按钮必须回滚为未选中。
+    btn->trigger();
+    QVERIFY(!btn->isChecked());
+    QVERIFY(win.findChild<CompareWidget*>() == nullptr);
+
+    tabMgr->createNewTab();
+    auto* ed1 = tabMgr->editorAt(0);
+    auto* ed2 = tabMgr->editorAt(1);
+    QVERIFY(ed1 != nullptr && ed2 != nullptr);
+    ed1->setTextFromUtf8("hello\nworld\n");
+    ed2->setTextFromUtf8("hello\nchanged\n");
+
+    btn->trigger();
+    QVERIFY(btn->isChecked());
+    QVERIFY(win.findChild<CompareWidget*>() != nullptr);
+
+    btn->trigger(); // 再次点击退出
+    QVERIFY(!btn->isChecked());
+    QVERIFY(win.findChild<CompareWidget*>() == nullptr);
+    QVERIFY2(!guard.isNull(), "退出比对不能销毁 TabManager");
+    QCOMPARE(win.centralWidget(), static_cast<QWidget*>(tabMgr));
+
+    // 菜单/快捷键进入时按钮也要变选中，Ctrl+Alt+X 退出时要取消选中。
+    auto* actCompare = win.findChild<QAction*>("actCompare");
+    QVERIFY(actCompare != nullptr);
+    actCompare->trigger();
+    QVERIFY(btn->isChecked());
+    QVERIFY(win.findChild<CompareWidget*>() != nullptr);
+
+    auto* actClear = win.findChild<QAction*>("actClearCompare");
+    QVERIFY(actClear != nullptr);
+    actClear->trigger();
+    QVERIFY(!btn->isChecked());
+    QVERIFY(win.findChild<CompareWidget*>() == nullptr);
+}
+
+// 视图菜单里的比对项收敛为一个子菜单；差异导航/关闭对比只在比对模式的工具条上出现。
+void TestDiffEngine::compareMenuIsGroupedAndToolbarHasNavigationButtons()
+{
+    MainWindow win;
+    win.show();
+
+    auto* compareMenu = win.findChild<QMenu*>("menuCompare");
+    QVERIFY(compareMenu != nullptr);
+    QCOMPARE(compareMenu->actions().size(), 5);
+    // 五个入口都归属子菜单，而不是平铺在「视图」里。
+    for (const char* name : {"actCompare", "actCompareSelection", "actCompareGit",
+                            "actCompareSvn", "actClearCompare"}) {
+        auto* action = win.findChild<QAction*>(QString::fromLatin1(name));
+        QVERIFY2(action != nullptr, name);
+        QCOMPARE(action->parent(), static_cast<QObject*>(compareMenu));
+    }
+    // F8 / Shift+F8 仍作为窗口级快捷动作保留，只是不再占菜单位置。
+    QVERIFY(win.findChild<QAction*>("actNextDiff") != nullptr);
+    QVERIFY(win.findChild<QAction*>("actPrevDiff") != nullptr);
+
+    // 未进入比对模式时不应存在这三个按钮。
+    QVERIFY(win.findChild<QPushButton*>("btnNextDiff") == nullptr);
+    QVERIFY(win.findChild<QPushButton*>("btnPrevDiff") == nullptr);
+    QVERIFY(win.findChild<QPushButton*>("btnCloseCompare") == nullptr);
+
+    auto* tabMgr = win.findChild<TabManager*>();
+    QVERIFY(tabMgr != nullptr);
+    tabMgr->createNewTab();
+    auto* ed1 = tabMgr->editorAt(0);
+    auto* ed2 = tabMgr->editorAt(1);
+    QVERIFY(ed1 != nullptr && ed2 != nullptr);
+    ed1->setTextFromUtf8("a\nb\nc\n");
+    ed2->setTextFromUtf8("a\nB\nc\n");
+    win.findChild<QAction*>("actCompare")->trigger();
+
+    auto* cmp = win.findChild<CompareWidget*>();
+    QVERIFY(cmp != nullptr);
+    auto* btnNext = win.findChild<QPushButton*>("btnNextDiff");
+    auto* btnPrev = win.findChild<QPushButton*>("btnPrevDiff");
+    auto* btnClose = win.findChild<QPushButton*>("btnCloseCompare");
+    QVERIFY(btnNext != nullptr && btnPrev != nullptr && btnClose != nullptr);
+    QCoreApplication::processEvents();
+    QVERIFY2(btnNext->isVisible() && btnPrev->isVisible() && btnClose->isVisible(),
+             "三个按钮必须在比对模式工具条上实际可见");
+    QVERIFY(btnNext->isEnabled());
+
+    const int before = cmp->currentDiffIndex();
+    btnNext->click();
+    QVERIFY(cmp->currentDiffIndex() != before || cmp->totalDiffCount() <= 1);
+    btnPrev->click();
+    QVERIFY(cmp->currentDiffIndex() >= 0);
+
+    btnClose->click();
+    QVERIFY(win.findChild<CompareWidget*>() == nullptr);
+    QVERIFY(win.findChild<QPushButton*>("btnNextDiff") == nullptr);
     QCOMPARE(win.centralWidget(), static_cast<QWidget*>(tabMgr));
 }

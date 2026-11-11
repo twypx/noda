@@ -34,4 +34,6 @@ private slots:
     void repeatedRefreshWhileAsyncIsSafe();
     void asyncCompareCloseDuringComputationIsSafe();
     void compareModeKeepsTabManagerAlive();
+    void toolbarCompareButtonTogglesCompareMode();
+    void compareMenuIsGroupedAndToolbarHasNavigationButtons();
 };

@@ -140,8 +140,16 @@ to Gitee Releases via the API. No repo name is hard-coded.
 
 ## 10. Comparison / Diff (modules P.6 / P.7)
 
-Menu `视图` → `文件对比` (`Ctrl+Alt+C`), `比对选区`, `与 Git HEAD 比对`, `与 SVN BASE 比对`,
-`关闭对比` (`Ctrl+Alt+X`), `下一个差异` (`F8`), `上一个差异` (`Shift+F8`).
+`视图 > 文件比对` is a **submenu** with five entries: `文件对比` (`Ctrl+Alt+C`), `比对选区`,
+`与 Git HEAD 比对`, `与 SVN BASE 比对`, `关闭对比` (`Ctrl+Alt+X`). The toolbar **Compare Files**
+button is a toggle: click to enter comparison (checked / highlighted), click again to exit; `Ctrl+Alt+C`
+has the same toggle semantics.
+
+Inside comparison mode the options bar (beside *Ignore whitespace* / *Ignore case*) shows three buttons:
+**Next Difference**, **Previous Difference** and **Close Compare**. They are owned by `CompareWidget`,
+so they exist only while the comparison view is open. `F8` / `Shift+F8` remain window-level shortcuts.
+Every entry point (menu / shortcut / selection / Git / SVN) keeps the toolbar button's checked state in
+sync; if an entry is rejected by a guard (too few tabs, file too large) the button rolls back to unchecked.
 
 **Engine (`utils/DiffEngine`)**
 - Zero-copy tokenization: `std::string_view` lines over `EditorView::currentTextView()`

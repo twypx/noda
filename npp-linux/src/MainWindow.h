@@ -246,6 +246,8 @@ private:
     // 安全切换 central widget：先用 takeCentralWidget() 取回旧控件所有权，
     // 避免 QMainWindow::setCentralWidget 把旧控件 deleteLater（比对模式崩溃根因）。
     void switchCentralWidget(QWidget* next);
+    // 同步工具栏比对按钮的选中态（所有进入/退出比对的入口共用，避免状态不一致）。
+    void setCompareToggleChecked(bool on);
     // 标签右键菜单的弹出入口；菜单项全部通过 createTabContextMenu() 构建。
     void showTabContextMenu(int index, const QPoint& globalPos);
 
@@ -352,6 +354,7 @@ private:
     QAction* _actAbout{nullptr};
     QAction* _actViewHex{nullptr};
     QAction* _actCompare{nullptr};
+    QAction* _toolCompareToggle{nullptr};  // 工具栏可切换按钮，与菜单入口共享状态
     QAction* _actCompareSelection{nullptr};
     QAction* _actCompareGit{nullptr};
     QAction* _actCompareSvn{nullptr};

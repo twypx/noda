@@ -9,6 +9,7 @@
 
 class EditorView;
 class QCheckBox;
+class QPushButton;
 
 class CompareWidget : public QWidget {
     Q_OBJECT
@@ -52,6 +53,7 @@ public:
 signals:
     void diffNavigated(int currentIndex, int totalCount);
     void diffComputing(bool computing);
+    void closeCompareRequested(); // 工具条「关闭对比」按钮
 
 private:
     void setupScintillaStyles(EditorView* ed);
@@ -74,6 +76,10 @@ private:
     Diff::AlignmentList _alignment;
     QCheckBox* _ignoreWhitespaceCheck{nullptr};
     QCheckBox* _ignoreCaseCheck{nullptr};
+    // 仅在比对模式存在的工具条按钮：差异导航与退出比对。
+    QPushButton* _nextDiffButton{nullptr};
+    QPushButton* _prevDiffButton{nullptr};
+    QPushButton* _closeCompareButton{nullptr};
     QFutureWatcher<Diff::DiffResult>* _watcher{nullptr};
     std::vector<int> _diffLineIndices; // 差异对齐行索引
     int _currentDiffIndex{-1};

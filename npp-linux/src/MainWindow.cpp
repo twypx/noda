@@ -10,6 +10,7 @@
 #include "StyleManager.h"
 #include <QMenuBar>
 #include <QMenu>
+#include <QAction>
 #include <QToolBar>
 #include <QStatusBar>
 #include <QFile>
@@ -542,33 +543,43 @@ void MainWindow::setupViewMenu() {
     _actViewHex->setShortcut(QKeySequence(tr("Ctrl+Alt+H")));
 
     menu->addSeparator();
-    _actCompare = menu->addAction(tr("文件对比(&C)"), this, &MainWindow::onCompareFiles);
+    // 比对入口收敛为一个子菜单（与「标签页」「折叠层次」等分组一致）；
+    // 差异导航与关闭对比改为只在比对模式工具条上出现的按钮，不再平铺占「视图」菜单。
+    auto* compareMenu = menu->addMenu(tr("文件比对(&M)"));
+    compareMenu->setObjectName("menuCompare");
+
+    _actCompare = compareMenu->addAction(tr("文件对比(&C)"), this, &MainWindow::onCompareFiles);
     _actCompare->setObjectName("actCompare");
     _actCompare->setShortcut(QKeySequence(tr("Ctrl+Alt+C")));
 
-    _actCompareSelection = menu->addAction(tr("比对选区(&S)"), this, &MainWindow::onCompareSelection);
+    _actCompareSelection = compareMenu->addAction(tr("比对选区(&S)"), this, &MainWindow::onCompareSelection);
     _actCompareSelection->setObjectName("actCompareSelection");
 
-    _actCompareGit = menu->addAction(tr("与 Git HEAD 比对(&G)"), this, &MainWindow::onCompareGitHead);
+    _actCompareGit = compareMenu->addAction(tr("与 Git HEAD 比对(&G)"), this, &MainWindow::onCompareGitHead);
     _actCompareGit->setObjectName("actCompareGit");
 
-    _actCompareSvn = menu->addAction(tr("与 SVN BASE 比对(&V)"), this, &MainWindow::onCompareSvnBase);
+    _actCompareSvn = compareMenu->addAction(tr("与 SVN BASE 比对(&V)"), this, &MainWindow::onCompareSvnBase);
     _actCompareSvn->setObjectName("actCompareSvn");
 
-    _actClearCompare = menu->addAction(tr("关闭对比(&X)"), this, &MainWindow::onCloseCompare);
+    _actClearCompare = compareMenu->addAction(tr("关闭对比(&X)"), this, &MainWindow::onCloseCompare);
     _actClearCompare->setObjectName("actClearCompare");
     _actClearCompare->setShortcut(QKeySequence(tr("Ctrl+Alt+X")));
     _actClearCompare->setEnabled(false);
 
-    _actNextDiff = menu->addAction(tr("下一个差异(&N)"), this, &MainWindow::onNextDiff);
+    // F8 / Shift+F8 保留为窗口级快捷动作，只是不再占菜单位置。
+    _actNextDiff = new QAction(tr("下一个差异(&N)"), this);
     _actNextDiff->setObjectName("actNextDiff");
     _actNextDiff->setShortcut(QKeySequence(Qt::Key_F8));
     _actNextDiff->setEnabled(false);
+    connect(_actNextDiff, &QAction::triggered, this, &MainWindow::onNextDiff);
+    addAction(_actNextDiff);
 
-    _actPrevDiff = menu->addAction(tr("上一个差异(&P)"), this, &MainWindow::onPrevDiff);
+    _actPrevDiff = new QAction(tr("上一个差异(&P)"), this);
     _actPrevDiff->setObjectName("actPrevDiff");
     _actPrevDiff->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F8));
     _actPrevDiff->setEnabled(false);
+    connect(_actPrevDiff, &QAction::triggered, this, &MainWindow::onPrevDiff);
+    addAction(_actPrevDiff);
 
     _actDarkMode = menu->addAction("深色模式", this, &MainWindow::onToggleDarkMode);
     _actDarkMode->setCheckable(true);
@@ -747,10 +758,15 @@ void MainWindow::setupToolBar() {
     addToggleTool("indent-guide", QStringLiteral("显示缩进参考线"), _actShowGuides, &MainWindow::onToggleShowIndentGuides);
     addToggleTool("binary", QStringLiteral("以十六进制查看"), _actViewHex, &MainWindow::onToggleHexView);
 
-    QAction* tbCompare = _toolBar->addAction(QStringLiteral("文件对比"));
-    connect(tbCompare, &QAction::triggered, this, &MainWindow::onCompareFiles);
-    tbCompare->setToolTip(QStringLiteral("文件对比 (Ctrl+Alt+C)"));
-    _toolActions.append(qMakePair(tbCompare, QStringLiteral("git-compare")));
+    // 「文件对比」是开关型按钮：点击进入比对（选中态），再次点击退出。
+    // 菜单 Ctrl+Alt+C / Ctrl+Alt+X 以及选区、Git/SVN 等入口统一由
+    // createCompareView() / onCloseCompare() 同步它的选中态。
+    _toolCompareToggle = _toolBar->addAction(tr("文件对比(&C)"));
+    _toolCompareToggle->setObjectName("toolCompareToggle");
+    _toolCompareToggle->setCheckable(true);
+    connect(_toolCompareToggle, &QAction::triggered, this, &MainWindow::onCompareFiles);
+    _toolCompareToggle->setToolTip(tr("文件对比 (Ctrl+Alt+C，再次点击退出)"));
+    _toolActions.append(qMakePair(_toolCompareToggle, QStringLiteral("git-compare")));
 
     refreshToolBarIcons();
 }
@@ -1748,8 +1764,13 @@ MainWindow::~MainWindow() {
 }
 
 void MainWindow::onCompareFiles() {
+    // 开关型入口（工具栏按钮 / Ctrl+Alt+C）：已在比对模式时再次触发即退出。
+    // 先统一回滚选中态，进入成功时由 createCompareView() 置回 true，
+    // 这样任何被护栏拒绝的 early return 都不会留下"假选中"。
+    setCompareToggleChecked(false);
+
     if (_compareWidget) {
-        _compareWidget->refreshDiff();
+        onCloseCompare();
         return;
     }
 
@@ -1841,6 +1862,7 @@ bool MainWindow::createCompareView(const std::string& textA, const std::string& 
     constexpr size_t kMaxCompareBytes = 16 * 1024 * 1024;
     if (textA.size() > kMaxCompareBytes || textB.size() > kMaxCompareBytes) {
         statusBar()->showMessage(l10n(QStringLiteral("文件过大，暂不支持比对（单侧上限 16MB）")), 5000);
+        setCompareToggleChecked(false);
         return false;
     }
 
@@ -1876,13 +1898,23 @@ bool MainWindow::createCompareView(const std::string& textA, const std::string& 
     connect(_compareWidget, &CompareWidget::diffComputing, this, [this](bool computing) {
         if (computing) statusBar()->showMessage(l10n(QStringLiteral("正在比对…")));
     });
+    connect(_compareWidget, &CompareWidget::closeCompareRequested,
+            this, &MainWindow::onCloseCompare);
 
     switchCentralWidget(_compareWidget);
 
     if (_actClearCompare) _actClearCompare->setEnabled(true);
     if (_actNextDiff) _actNextDiff->setEnabled(_compareWidget->totalDiffCount() > 0);
     if (_actPrevDiff) _actPrevDiff->setEnabled(_compareWidget->totalDiffCount() > 0);
+    setCompareToggleChecked(true); // 选区 / Git / SVN 等入口也同步为选中态
     return true;
+}
+
+void MainWindow::setCompareToggleChecked(bool on) {
+    if (!_toolCompareToggle || _toolCompareToggle->isChecked() == on) return;
+    // 阻断信号，保证纯状态同步不会反过来再次触发比对动作。
+    QSignalBlocker blocker(_toolCompareToggle);
+    _toolCompareToggle->setChecked(on);
 }
 
 // QMainWindow::setCentralWidget 会把旧的 central widget 排队删除（deleteLater）。
@@ -1902,6 +1934,7 @@ void MainWindow::switchCentralWidget(QWidget* next) {
 }
 
 void MainWindow::onCloseCompare() {
+    setCompareToggleChecked(false); // Ctrl+Alt+X / 菜单退出时同步按钮
     if (!_compareWidget) return;
 
     CompareWidget* cmp = _compareWidget;

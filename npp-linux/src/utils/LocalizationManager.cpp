@@ -306,6 +306,7 @@ const QHash<QString, QString>& extraDictionary() {
         {QStringLiteral("每词首字母大写(P)"), QStringLiteral("Title Case")},
         {QStringLiteral("以十六进制查看(&H)"), QStringLiteral("View as &Hex")},
         {QStringLiteral("以十六进制查看(H)"), QStringLiteral("View as Hex")},
+        {QStringLiteral("文件比对(&M)"), QStringLiteral("&Compare")}, // 视图下的比对子菜单标题
         {QStringLiteral("文件对比(&C)"), QStringLiteral("&Compare Files")},
         {QStringLiteral("文件对比(C)"), QStringLiteral("Compare Files")},
         {QStringLiteral("关闭对比(&X)"), QStringLiteral("Close Compare(&X)")},
@@ -317,6 +318,9 @@ const QHash<QString, QString>& extraDictionary() {
         {QStringLiteral("比对选区(&S)"), QStringLiteral("&Compare Selection...")},
         {QStringLiteral("与 Git HEAD 比对(&G)"), QStringLiteral("Compare with &Git HEAD")},
         {QStringLiteral("与 SVN BASE 比对(&V)"), QStringLiteral("Compare with S&VN BASE")},
+        // 工具栏可切换按钮的 tooltip：整串收录，避免 translateTooltip 只译主体、残留中文后缀。
+        {QStringLiteral("文件对比 (Ctrl+Alt+C，再次点击退出)"),
+         QStringLiteral("Compare Files (Ctrl+Alt+C, click again to exit)")},
 
         // ---- 比对状态栏（运行期拼接，模板与静态串都要收录）----
         {QStringLiteral("比对功能至少需要打开两个标签页"), QStringLiteral("Comparison requires at least two open tabs")},
