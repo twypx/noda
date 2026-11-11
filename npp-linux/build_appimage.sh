@@ -120,9 +120,22 @@ mkdir -p "${DIST_DIR}"
 # AppImage 收拢到仓库根 dist/ 下。
 TMP_OUT="$(mktemp -d)"
 ( cd "${TMP_OUT}" && "$LINUXDEPLOY" --appdir "${APPDIR}" --plugin qt --output appimage )
-mv -f "${TMP_OUT}"/noda-*"${APPIMAGE_ARCH}".AppImage "${DIST_DIR}/" 2>/dev/null || true
+# linuxdeploy 依据 .desktop 的 Name（Noda）与 $VERSION 命名，生成的文件名形如
+# Noda-1.0.20-x86_64.AppImage（首字母大写），故用大小写不敏感的通配抓取。
+shopt -s nullglob nocaseglob
+# linuxdeploy 产出形如 Noda-1.0.20-x86_64.AppImage（架构前是 “-” 而非 “.”），
+# 直接用 *.AppImage 通配最稳妥。
+GEN_APPIMAGE=( "${TMP_OUT}"/*.AppImage )
+shopt -u nullglob nocaseglob
+if [[ ${#GEN_APPIMAGE[@]} -eq 0 ]]; then
+    echo "错误: linuxdeploy 未能生成 AppImage（请检查 ${TMP_OUT}）" >&2
+    rm -rf "${TMP_OUT}"
+    exit 1
+fi
+mv -f "${GEN_APPIMAGE[0]}" "${DIST_DIR}/"
 rm -rf "${TMP_OUT}"
-OUT="$(ls -1t "${DIST_DIR}"/noda-*"${APPIMAGE_ARCH}".AppImage 2>/dev/null | head -1)"
+OUT="$(find "${DIST_DIR}" -maxdepth 1 -iname '*.AppImage' 2>/dev/null | head -1)"
 echo "=== 完成 ==="
 echo "    AppImage: ${OUT:-${DIST_DIR}/noda-*.AppImage}"
+exit 0
 echo "    安装即用: chmod +x <AppImage> && ./<AppImage>"

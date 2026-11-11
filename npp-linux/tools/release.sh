@@ -160,7 +160,7 @@ echo ">>> 产物: ${DEB_NAME} ($(du -h "$DEB" | cut -f1))"
 # ---- 6b. 构建 AppImage ----------------------------------------------------
 echo ">>> 开始构建 AppImage ..."
 ./npp-linux/build_appimage.sh
-APPIMAGE="$(ls -1t ./dist/noda-*.AppImage 2>/dev/null | head -1)"
+APPIMAGE="$(ls -1t ./dist/[Nn]oda-*.AppImage 2>/dev/null | head -1)"
 if [[ -z "$APPIMAGE" ]]; then
     echo "错误: 未找到生成的 AppImage" >&2
     exit 1
