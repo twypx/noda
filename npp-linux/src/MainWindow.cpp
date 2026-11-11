@@ -27,6 +27,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QPalette>
+#include <QColor>
 #include <QStyle>
 #include <QStyleFactory>
 #include <QDesktopServices>
@@ -2329,6 +2330,13 @@ void MainWindow::applyPreferences(const AppPreferences& prefs, bool force) {
         if (_actDarkMode) _actDarkMode->setChecked(prefs.darkMode);
     }
 
+    // 主题色令牌：启动时只设置令牌，构造末尾的 applyTheme() 会统一落地，
+    // 避免重复 setStyle() 拖慢启动；运行中修改才需要立刻重建样式表。
+    ThemeManager::setAccentColor(QColor(prefs.accentColor));
+    if (!force && old.accentColor != prefs.accentColor) {
+        ThemeManager::applyTheme(prefs.darkMode);
+    }
+
     if (_actWrap && (force || old.wordWrap != prefs.wordWrap))
         _actWrap->setChecked(prefs.wordWrap);
     if (_actShowWs && (force || old.showWhitespace != prefs.showWhitespace))
@@ -2419,6 +2427,10 @@ void MainWindow::loadPreferences() {
     QSettings s;
     _prefs.uiLanguage = s.value("prefs/uiLanguage", "zh_CN").toString();
     _prefs.darkMode = s.value("prefs/darkMode", false).toBool();
+    const QString storedAccent =
+        s.value("prefs/accentColor", QStringLiteral("#A882FF")).toString();
+    _prefs.accentColor = QColor::isValidColor(storedAccent)
+                             ? storedAccent : QStringLiteral("#A882FF");
     _prefs.uiFontZh = s.value("prefs/uiFontZh", "").toString();
     _prefs.uiFontEn = s.value("prefs/uiFontEn", "").toString();
 
@@ -2473,6 +2485,7 @@ void MainWindow::savePreferences() {
     QSettings s;
     s.setValue("prefs/uiLanguage", _prefs.uiLanguage);
     s.setValue("prefs/darkMode", _prefs.darkMode);
+    s.setValue("prefs/accentColor", _prefs.accentColor);
     s.setValue("prefs/uiFontZh", _prefs.uiFontZh);
     s.setValue("prefs/uiFontEn", _prefs.uiFontEn);
 

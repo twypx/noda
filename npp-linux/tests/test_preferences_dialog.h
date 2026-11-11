@@ -35,4 +35,13 @@ private slots:
     void braceHighlightFollowsPreference();
     // 首选项里不再出现上游关系、实现说明、英文括注或不支持的占位项。
     void preferencesUiIsCleanAndHasNoPlaceholders();
+    // 外观页主题色：预设色板 + 颜色选择器 + 自定义色保留。
+    void accentColorPresetsAndCustomPicker();
+    void accentColorCustomValueIsPreserved();
+    // 主题色真正驱动 QSS 与 QPalette（深浅两套都不能残留紫色）。
+    void accentColorDrivesStyleSheetAndPalette();
+    // 主题色从 QSettings 启动恢复，非法值回退默认。
+    void accentColorLoadsFromSettings();
+    // 默认主题色必须逐字节还原改造前的紫色令牌，视觉零回归。
+    void defaultAccentKeepsOriginalPalette();
 };

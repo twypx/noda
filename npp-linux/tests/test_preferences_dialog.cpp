@@ -15,6 +15,9 @@
 #include <QStackedWidget>
 #include <QTabBar>
 #include <QToolBar>
+#include <QToolButton>
+#include <QColor>
+#include <QPalette>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QTreeWidgetItemIterator>
@@ -578,4 +581,108 @@ void TestPreferencesDialog::preferencesUiIsCleanAndHasNoPlaceholders() {
                      qPrintable(QStringLiteral("中文配置项错误带英文括注：%1").arg(text)));
         }
     }
+}
+
+namespace {
+QList<QToolButton*> accentPresetButtons(const PreferencesDialog& dlg) {
+    QList<QToolButton*> out;
+    for (QToolButton* button : dlg.findChildren<QToolButton*>()) {
+        if (button->objectName().startsWith(QStringLiteral("accentPreset_"))) {
+            out.append(button);
+        }
+    }
+    return out;
+}
+} // namespace
+
+void TestPreferencesDialog::accentColorPresetsAndCustomPicker()
+{
+    AppPreferences prefs;
+    QCOMPARE(prefs.accentColor, QStringLiteral("#A882FF")); // 默认仍是当前紫色
+
+    PreferencesDialog dlg(prefs);
+    const QList<QToolButton*> presets = accentPresetButtons(dlg);
+    QVERIFY2(presets.size() >= 6, "应提供多个常见主题色预设");
+    QVERIFY(dlg.findChild<QPushButton*>(QStringLiteral("accentCustomButton")) != nullptr);
+    QVERIFY(dlg.findChild<QLabel*>(QStringLiteral("accentValueLabel")) != nullptr);
+
+    // 默认紫色对应第一个预设且处于选中态
+    QVERIFY(presets.first()->isChecked());
+
+    // 选择 macOS 蓝，onAccept 后偏好应更新
+    presets.at(1)->click();
+    QMetaObject::invokeMethod(&dlg, "onAccept", Qt::DirectConnection);
+    QCOMPARE(dlg.getPreferences().accentColor, QStringLiteral("#0A84FF"));
+}
+
+void TestPreferencesDialog::accentColorCustomValueIsPreserved()
+{
+    AppPreferences prefs;
+    prefs.accentColor = QStringLiteral("#123456");
+    PreferencesDialog dlg(prefs);
+
+    const QList<QToolButton*> presets = accentPresetButtons(dlg);
+    for (QToolButton* button : presets) {
+        QVERIFY2(!button->isChecked(), "自定义色不应被误判为某个预设");
+    }
+    QMetaObject::invokeMethod(&dlg, "onAccept", Qt::DirectConnection);
+    QCOMPARE(dlg.getPreferences().accentColor, QStringLiteral("#123456"));
+}
+
+void TestPreferencesDialog::accentColorDrivesStyleSheetAndPalette()
+{
+    const QColor original = ThemeManager::accentColor();
+    ThemeManager::setAccentColor(QColor(QStringLiteral("#0A84FF")));
+
+    const QString dark = ThemeManager::getStyleSheet(true);
+    const QString light = ThemeManager::getStyleSheet(false);
+    QVERIFY2(dark.contains(QStringLiteral("#0a84ff")), "深色 QSS 应包含所选主题色");
+    QVERIFY2(!dark.contains(QStringLiteral("#a882ff")), "深色 QSS 不应残留旧紫色");
+    QVERIFY2(!light.contains(QStringLiteral("#7852ee")), "浅色 QSS 不应残留旧紫色");
+    QVERIFY2(!dark.contains(QStringLiteral("@ACCENT")) && !light.contains(QStringLiteral("@ACCENT")),
+             "所有主题色占位符都必须被替换");
+
+    ThemeManager::applyTheme(true);
+    QVERIFY(QApplication::palette().color(QPalette::Highlight) != QColor(QStringLiteral("#7852ee")));
+
+    // 恢复全局状态，避免影响后续用例
+    ThemeManager::setAccentColor(original);
+    ThemeManager::applyTheme(false);
+}
+
+void TestPreferencesDialog::accentColorLoadsFromSettings()
+{
+    QSettings settings;
+    const QString original = settings.value(QStringLiteral("prefs/accentColor")).toString();
+    settings.setValue(QStringLiteral("prefs/accentColor"), QStringLiteral("#E95420"));
+    {
+        MainWindow win;
+        QCOMPARE(ThemeManager::accentColor(), QColor(QStringLiteral("#E95420")));
+        QVERIFY2(ThemeManager::getStyleSheet(true).contains(QStringLiteral("#e95420")),
+                 "启动恢复的主题色必须真正进入样式表");
+    }
+    // 非法值应回退默认紫
+    settings.setValue(QStringLiteral("prefs/accentColor"), QStringLiteral("not-a-color"));
+    {
+        MainWindow win;
+        QCOMPARE(ThemeManager::accentColor(), QColor(QStringLiteral("#A882FF")));
+    }
+
+    if (original.isEmpty()) settings.remove(QStringLiteral("prefs/accentColor"));
+    else settings.setValue(QStringLiteral("prefs/accentColor"), original);
+    ThemeManager::setAccentColor(QColor(QStringLiteral("#A882FF")));
+    ThemeManager::applyTheme(false);
+}
+
+void TestPreferencesDialog::defaultAccentKeepsOriginalPalette()
+{
+    ThemeManager::setAccentColor(QColor(ThemeManager::defaultAccentHex()));
+    const QString dark = ThemeManager::getStyleSheet(true);
+    const QString light = ThemeManager::getStyleSheet(false);
+    QVERIFY2(dark.contains(QStringLiteral("#a882ff")), "深色应保持原亮紫强调色");
+    QVERIFY2(dark.contains(QStringLiteral("#7852ee")), "深色应保持原高亮紫");
+    QVERIFY2(light.contains(QStringLiteral("#7852ee")), "浅色应保持原暗紫强调色");
+    QVERIFY2(light.contains(QStringLiteral("#ede9fe")), "浅色应保持原淡紫选区底色");
+    QVERIFY2(!dark.contains(QStringLiteral("@ACCENT")) && !light.contains(QStringLiteral("@ACCENT")),
+             "占位符必须全部落地");
 }

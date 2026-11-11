@@ -11,6 +11,10 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QPushButton>
+#include <QToolButton>
+#include <QButtonGroup>
+#include <QColorDialog>
+#include <QColor>
 
 namespace FontFamilies {
 namespace {
@@ -279,6 +283,80 @@ QWidget* PreferencesDialog::createPageAppearance(const AppPreferences& current) 
     fontGroupLayout->addRow(tr("英文字体:"), _uiFontEnCombo);
 
     layout->addLayout(formLayout);
+
+    // 主题色：常见预设 + 颜色选择器自定义。色板用互斥 QToolButton，
+    // 自定义色不属于任何预设，由右侧预览块显示当前值。
+    auto* accentGroup = new QGroupBox(tr("主题色"), page);
+    auto* accentLayout = new QVBoxLayout(accentGroup);
+    auto* accentHint = new QLabel(tr("主题色将影响选中、链接、按钮高亮等元素。"), accentGroup);
+    accentHint->setWordWrap(true);
+    accentLayout->addWidget(accentHint);
+
+    _accentColor = QColor::isValidColor(current.accentColor)
+                       ? current.accentColor : QStringLiteral("#A882FF");
+    auto* swatchRow = new QHBoxLayout();
+    swatchRow->setSpacing(8);
+    _accentGroup = new QButtonGroup(accentGroup);
+    _accentGroup->setExclusive(true);
+
+    const QVector<QPair<QString, QString>> presets = {
+        {tr("默认紫"),    QStringLiteral("#A882FF")},
+        {tr("macOS 蓝"),  QStringLiteral("#0A84FF")},
+        {tr("Ubuntu 橙"), QStringLiteral("#E95420")},
+        {tr("GNOME 蓝"),  QStringLiteral("#3584E4")},
+        {tr("翠绿"),      QStringLiteral("#26A269")},
+        {tr("玫瑰红"),    QStringLiteral("#E5484D")},
+        {tr("琥珀"),      QStringLiteral("#E5A50A")},
+    };
+    for (int i = 0; i < presets.size(); ++i) {
+        const QString name = presets.at(i).first;
+        const QString hex = presets.at(i).second;
+        auto* swatch = new QToolButton(accentGroup);
+        swatch->setObjectName(QStringLiteral("accentPreset_%1").arg(i));
+        swatch->setProperty("accentHex", hex);
+        swatch->setCheckable(true);
+        swatch->setFixedSize(26, 26);
+        swatch->setToolTip(name);
+        swatch->setStyleSheet(QStringLiteral(
+            "QToolButton { background-color: %1; border: 2px solid transparent; border-radius: 13px; }"
+            "QToolButton:hover { border: 2px solid palette(highlight); }"
+            "QToolButton:checked { border: 2px solid palette(window-text); }").arg(hex));
+        swatch->setChecked(hex.compare(_accentColor, Qt::CaseInsensitive) == 0);
+        _accentGroup->addButton(swatch, i);
+        _accentPresets.append(swatch);
+        swatchRow->addWidget(swatch);
+        connect(swatch, &QToolButton::clicked, this, [this, swatch]() {
+            _accentColor = swatch->property("accentHex").toString();
+            updateAccentPreview();
+        });
+    }
+    swatchRow->addStretch(1);
+
+    _accentCustomButton = new QPushButton(tr("自定义…"), accentGroup);
+    _accentCustomButton->setObjectName(QStringLiteral("accentCustomButton"));
+    swatchRow->addWidget(_accentCustomButton);
+    connect(_accentCustomButton, &QPushButton::clicked, this, [this, accentGroup]() {
+        // 与文件对话框一致：强制 Qt 内建对话框，避免部分 Linux 桌面原生对话框弹不出。
+        const QColor chosen = QColorDialog::getColor(
+            QColor(_accentColor), accentGroup, tr("选择主题色"),
+            QColorDialog::DontUseNativeDialog);
+        if (!chosen.isValid()) return;
+        _accentColor = chosen.name().toUpper();
+        if (auto* checked = _accentGroup->checkedButton()) {
+            _accentGroup->setExclusive(false);
+            checked->setChecked(false);
+            _accentGroup->setExclusive(true);
+        }
+        updateAccentPreview();
+    });
+
+    _accentValueLabel = new QLabel(accentGroup);
+    _accentValueLabel->setObjectName(QStringLiteral("accentValueLabel"));
+    swatchRow->addWidget(_accentValueLabel);
+    accentLayout->addLayout(swatchRow);
+    layout->addWidget(accentGroup);
+    updateAccentPreview();
+
     layout->addWidget(fontGroup);
     layout->addStretch();
     return page;
@@ -660,6 +738,7 @@ QWidget* PreferencesDialog::createPageSessionBackup(const AppPreferences& curren
 void PreferencesDialog::onAccept() {
     if (_langCombo) _prefs.uiLanguage = _langCombo->currentData().toString();
     if (_darkModeCheck) _prefs.darkMode = _darkModeCheck->isChecked();
+    if (!_accentColor.isEmpty()) _prefs.accentColor = _accentColor;
     if (_uiFontZhCombo) _prefs.uiFontZh = fontComboValue(_uiFontZhCombo);
     if (_uiFontEnCombo) _prefs.uiFontEn = fontComboValue(_uiFontEnCombo);
 
@@ -724,6 +803,16 @@ void PreferencesDialog::onAccept() {
     if (_backupIntervalSpin) _prefs.backupIntervalSec = _backupIntervalSpin->value();
 
     accept();
+}
+
+void PreferencesDialog::updateAccentPreview() {
+    if (!_accentValueLabel) return;
+    const QColor c(_accentColor);
+    const QString fg = c.lightness() > 140 ? QStringLiteral("#222222") : QStringLiteral("#ffffff");
+    _accentValueLabel->setText(QStringLiteral(" %1 ").arg(_accentColor.toUpper()));
+    _accentValueLabel->setStyleSheet(QStringLiteral(
+        "QLabel { background-color: %1; color: %2; border-radius: 3px;"
+        " padding: 3px 8px; font-weight: bold; }").arg(c.name(), fg));
 }
 
 AppPreferences PreferencesDialog::getPreferences() const {

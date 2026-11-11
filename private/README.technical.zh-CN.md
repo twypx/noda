@@ -543,6 +543,24 @@ cd npp-linux
 
 ---
 
+## 主题色（Accent Color）
+
+「首选项 > 外观 > 主题色」提供 7 个常见预设：`默认紫`（保持改造前的 Obsidian 紫）、`macOS 蓝`、
+`Ubuntu 橙`、`GNOME 蓝`、`翠绿`、`玫瑰红`、`琥珀`，以及「自定义…」按钮 —— 用 Qt 内建
+`QColorDialog`（带 `DontUseNativeDialog`，避免部分 Linux 桌面原生对话框弹不出）任意取色。
+色板是互斥的圆形色块，右侧预览块显示当前十六进制值；自定义色不属于任何预设，不会被误勾选。
+
+主题色影响 QSS 里的选中底色、链接色、`QToolButton:checked`、输入控件焦点边框、标签色条、
+分组标题等，以及 `QPalette::Link` / `QPalette::Highlight`。实现上把所有硬编码紫色换成
+`@ACCENT@` / `@ACCENT_RGB@` / `@ACCENT_DEEP@` / `@ACCENT_TINT@` 四个占位符，由
+`finishStyleSheet()` 在生成样式表时按深浅主题落地 —— 深/浅各取同一基色的不同明度。
+默认基色对三档派生色做精确还原，保证不选新颜色时视觉零回归（已有测试逐字节锁住）。
+
+配置存于 `prefs/accentColor`，启动时载入并校验（非法值回退默认紫）；运行期修改会重建全局
+样式表，界面字体等既有设置由 `ThemeManager` 的字体缓存补回，不受影响。
+
+---
+
 ## 文件比对（Comparison / Diff）
 
 「视图 > 文件比对」是收敛后的**子菜单**，含 6 项：`文件对比`（`Ctrl+Alt+C`）、`比对选区`、

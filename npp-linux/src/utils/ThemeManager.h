@@ -26,6 +26,13 @@ class ThemeManager {
 public:
     static void applyTheme(bool isDark);
     static QString getStyleSheet(bool isDark);
+    // 主题色（影响选中、链接、按钮高亮、标签色条等）。默认 Obsidian 紫 #A882FF。
+    // setAccentColor() 只改令牌；调用方需再 applyTheme()/setUiFont() 重建样式表。
+    static void setAccentColor(const QColor& color);
+    static QColor accentColor();
+    static QColor accentColorFor(bool isDark); // 浅色下压暗以保证白底可读性
+    static QColor accentDeepColor();
+    static QString defaultAccentHex();
     // 同时更新 QApplication 默认字体和样式表里的 font-family；切换主题后仍保留该设置。
     static void setUiFont(const QFont& font, const QStringList& families);
     // 当前主题下的目录树行底色；applyTheme() 之前默认按浅色处理。

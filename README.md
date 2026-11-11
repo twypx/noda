@@ -77,6 +77,8 @@ and tuned for Linux** — not bolted on through plugins or a compatibility layer
 - [x] Style configurator: per language × style slot colours, bold/italic, font family & size.
 - [x] Preferences (tree): theme, UI language, tab bar, auto-completion, highlight matching,
       UI fonts, editor behaviour — only real, backed options.
+- [x] Accent color: 7 presets (default purple, macOS blue, Ubuntu orange, GNOME blue, …)
+      plus a custom color picker; applies to selection, links, highlights and tab bars.
 - [x] Shortcut mapper generated from real menu actions; editable, conflict detection, reset.
 - [x] Opening a folder: lazy, dependency-free directory tree in a left dock.
 - [x] Built-in hexadecimal / binary viewer with raw on-disk bytes.

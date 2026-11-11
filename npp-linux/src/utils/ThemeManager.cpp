@@ -17,6 +17,37 @@ bool s_darkTheme = false;
 QFont s_uiFont;
 bool s_uiFontSet = false;
 QStringList s_uiFontFamilies;
+QColor s_accent(0xA8, 0x82, 0xFF); // 默认主题色：Obsidian 紫
+
+QString rgbTriplet(const QColor& c) {
+    return QStringLiteral("%1, %2, %3").arg(c.red()).arg(c.green()).arg(c.blue());
+}
+
+QColor mixWithWhite(const QColor& c, qreal w) {
+    return QColor::fromRgbF(c.redF() * (1 - w) + w,
+                            c.greenF() * (1 - w) + w,
+                            c.blueF() * (1 - w) + w);
+}
+
+const QColor kDefaultAccent(0xA8, 0x82, 0xFF);
+
+// 默认基色必须精确还原改造前的三档紫色令牌，保证「默认主题色」视觉零回归；
+// 用户自定义色才按明度规则派生（深色用基色，浅色压暗保证白底对比度）。
+QColor accentFor(bool isDark) {
+    if (s_accent == kDefaultAccent)
+        return isDark ? kDefaultAccent : QColor(0x78, 0x52, 0xEE);
+    return isDark ? s_accent : s_accent.darker(125);
+}
+
+QColor accentDeep() {
+    if (s_accent == kDefaultAccent) return QColor(0x78, 0x52, 0xEE);
+    return s_accent.darker(130);
+}
+
+QColor accentTint() {
+    if (s_accent == kDefaultAccent) return QColor(0xED, 0xE9, 0xFE);
+    return mixWithWhite(s_accent, 0.88);
+}
 
 // QSS 的 image: 只认固定像素的 PNG，没有 DPR 概念。标签关闭按钮原来直接写死 x_16.png，
 // 2x 屏上它被按逻辑 16px（= 物理 32px）绘制，等于把 16px 原图拉大一倍，看着就是糊的；
@@ -69,10 +100,36 @@ QString finishStyleSheet(const QString& css, bool isDark) {
                 QLatin1String(isDark ? kTreeHoverDark : kTreeHoverLight));
     out.replace(QStringLiteral("@TREE_SELECTED_COLOR@"),
                 QLatin1String(isDark ? kTreeSelectedDark : kTreeSelectedLight));
+    // 主题色令牌：同一套 QSS 在深浅主题下取同一基色的不同明度。
+    const QColor main = accentFor(isDark);
+    out.replace(QStringLiteral("@ACCENT_RGB@"), rgbTriplet(main));
+    out.replace(QStringLiteral("@ACCENT_DEEP@"), accentDeep().name());
+    out.replace(QStringLiteral("@ACCENT_TINT@"), accentTint().name());
+    out.replace(QStringLiteral("@ACCENT@"), main.name());
     return out;
 }
 
 }   // namespace
+
+void ThemeManager::setAccentColor(const QColor& color) {
+    if (color.isValid()) s_accent = color;
+}
+
+QColor ThemeManager::accentColor() {
+    return s_accent;
+}
+
+QColor ThemeManager::accentColorFor(bool isDark) {
+    return accentFor(isDark);
+}
+
+QColor ThemeManager::accentDeepColor() {
+    return accentDeep();
+}
+
+QString ThemeManager::defaultAccentHex() {
+    return QStringLiteral("#A882FF");
+}
 
 FolderTreeColors ThemeManager::folderTreeColors() {
     // drawBranches 每行都会取一次颜色；静态构造，避免逐行解析颜色字符串。
@@ -130,7 +187,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 color: #dadada;
                 @UI_FONT_FAMILY_DECL@
                 font-size: 13px;
-                selection-background-color: #7852ee;
+                selection-background-color: @ACCENT_DEEP@;
                 selection-color: #ffffff;
             }
 
@@ -192,7 +249,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 border-radius: 3px;
             }
             QMenu::item:selected {
-                background-color: #7852ee;
+                background-color: @ACCENT_DEEP@;
                 color: #ffffff;
             }
             QMenu::separator {
@@ -226,12 +283,12 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 /* 开关型按钮的持续状态必须单独写：样式表一旦接管了 QToolButton，
                    就不会再回退原生外观，缺了 :checked 时选中与否看起来完全一样。
                    放在 :hover 之后，保证鼠标经过时仍看得出它是开着的。 */
-                background-color: rgba(168, 130, 255, 0.22);
-                border: 1px solid #a882ff;
+                background-color: rgba(@ACCENT_RGB@, 0.22);
+                border: 1px solid @ACCENT@;
                 color: #ffffff;
             }
             QToolButton:pressed {
-                background-color: rgba(168, 130, 255, 0.2);
+                background-color: rgba(@ACCENT_RGB@, 0.2);
             }
             QToolBar::separator {
                 width: 1px;
@@ -272,7 +329,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 color: #dadada;
                 border: 1px solid #333333;
                 border-bottom: 1px solid #1C1C1C;
-                border-top: 2px solid #a882ff;
+                border-top: 2px solid @ACCENT@;
                 margin-bottom: -1px;
                 padding-bottom: 4px;
                 font-weight: bold;
@@ -409,7 +466,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 padding: 4px 8px;
             }
             QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
-                border: 1.5px solid #a882ff;
+                border: 1.5px solid @ACCENT@;
             }
             QPushButton {
                 background-color: #333333;
@@ -426,7 +483,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 background-color: #2a2a2a;
             }
             QPushButton:default {
-                background-color: #7852ee;
+                background-color: @ACCENT_DEEP@;
                 color: #ffffff;
                 border: none;
             }
@@ -444,7 +501,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
                 padding: 0 6px;
-                color: #a882ff;
+                color: @ACCENT@;
             }
         )", isDark);
     } else {
@@ -465,7 +522,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 color: #222222;
                 @UI_FONT_FAMILY_DECL@
                 font-size: 13px;
-                selection-background-color: #ede9fe;
+                selection-background-color: @ACCENT_TINT@;
                 selection-color: #222222;
             }
 
@@ -527,7 +584,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 border-radius: 3px;
             }
             QMenu::item:selected {
-                background-color: #7852ee;
+                background-color: @ACCENT@;
                 color: #ffffff;
             }
             QMenu::separator {
@@ -559,12 +616,12 @@ QString ThemeManager::getStyleSheet(bool isDark) {
             }
             QToolButton:checked {
                 /* 同深色一套：没有 :checked 规则时，开关按钮看不出是开还是关。 */
-                background-color: rgba(120, 82, 238, 0.14);
-                border: 1px solid #7852ee;
+                background-color: rgba(@ACCENT_RGB@, 0.14);
+                border: 1px solid @ACCENT@;
                 color: #1a1a1a;
             }
             QToolButton:pressed {
-                background-color: rgba(120, 82, 238, 0.15);
+                background-color: rgba(@ACCENT_RGB@, 0.15);
             }
             QToolBar::separator {
                 width: 1px;
@@ -605,7 +662,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 color: #222222;
                 border: 1px solid #e4e4e4;
                 border-bottom: 1px solid #ffffff;
-                border-top: 2px solid #7852ee;
+                border-top: 2px solid @ACCENT@;
                 margin-bottom: -1px;
                 padding-bottom: 4px;
                 font-weight: bold;
@@ -740,7 +797,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 padding: 4px 8px;
             }
             QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
-                border: 1.5px solid #7852ee;
+                border: 1.5px solid @ACCENT@;
             }
             QPushButton {
                 background-color: #ffffff;
@@ -757,7 +814,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 background-color: #e4e4e4;
             }
             QPushButton:default {
-                background-color: #7852ee;
+                background-color: @ACCENT@;
                 color: #ffffff;
                 border: none;
             }
@@ -775,7 +832,7 @@ QString ThemeManager::getStyleSheet(bool isDark) {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
                 padding: 0 6px;
-                color: #7852ee;
+                color: @ACCENT@;
             }
         )", isDark);
     }
@@ -786,6 +843,9 @@ void ThemeManager::applyTheme(bool isDark) {
     QApplication::setStyle(QStyleFactory::create("Fusion"));
     // setStyle() 会重建默认字体；把首选项字体补回去，后续样式表也带同一 font-family。
     if (s_uiFontSet) QApplication::setFont(s_uiFont);
+
+    const QColor accentMain = accentFor(isDark);
+    const QColor accentDeepColor = accentDeep();
 
     QPalette p;
     if (isDark) {
@@ -800,8 +860,8 @@ void ThemeManager::applyTheme(bool isDark) {
         p.setColor(QPalette::Button, QColor(0x33, 0x33, 0x33));
         p.setColor(QPalette::ButtonText, QColor(0xda, 0xda, 0xda));
         p.setColor(QPalette::BrightText, QColor(0xfb, 0x46, 0x4c));
-        p.setColor(QPalette::Link, QColor(0xa8, 0x82, 0xff));
-        p.setColor(QPalette::Highlight, QColor(0x78, 0x52, 0xee));
+        p.setColor(QPalette::Link, accentMain);
+        p.setColor(QPalette::Highlight, accentDeepColor);
         p.setColor(QPalette::HighlightedText, Qt::white);
     } else {
         // Obsidian Light Palette
@@ -815,8 +875,8 @@ void ThemeManager::applyTheme(bool isDark) {
         p.setColor(QPalette::Button, QColor(0xff, 0xff, 0xff));
         p.setColor(QPalette::ButtonText, QColor(0x22, 0x22, 0x22));
         p.setColor(QPalette::BrightText, QColor(0xe9, 0x31, 0x47));
-        p.setColor(QPalette::Link, QColor(0x78, 0x52, 0xee));
-        p.setColor(QPalette::Highlight, QColor(0x78, 0x52, 0xee));
+        p.setColor(QPalette::Link, accentMain);
+        p.setColor(QPalette::Highlight, accentDeepColor);
         p.setColor(QPalette::HighlightedText, Qt::white);
     }
 

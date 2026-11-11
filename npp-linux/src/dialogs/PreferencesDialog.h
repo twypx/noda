@@ -8,6 +8,13 @@
 #include <QStringList>
 #include <QTreeWidget>
 #include <QStackedWidget>
+#include <QVector>
+#include <QColor>
+
+class QToolButton;
+class QButtonGroup;
+class QLabel;
+class QPushButton;
 
 // 三个字体下拉共享同一份系统字体清单。QFontComboBox 每实例化一次都会重新枚举
 // Fontconfig 全量字体并构建上千项模型，重复三次会拖慢首选项的弹出。
@@ -21,6 +28,7 @@ struct AppPreferences {
     // 1. 外观与行为 -> 外观
     QString uiLanguage{"zh_CN"};             // "zh_CN" (简体中文), "en_US" (English)
     bool darkMode{false};                    // 亮色/暗色
+    QString accentColor{"#A882FF"};          // 主题色（选中/链接/高亮等），默认 Obsidian 紫
     QString uiFontZh{""};                    // 主界面中文字体
     QString uiFontEn{""};                    // 主界面英文字体
 
@@ -89,6 +97,7 @@ class PreferencesDialog : public QDialog {
 public:
     explicit PreferencesDialog(const AppPreferences& current, QWidget* parent = nullptr);
     AppPreferences getPreferences() const;
+    void updateAccentPreview();
 
 public slots:
     void onAccept();
@@ -116,6 +125,12 @@ private:
     // 外观
     QComboBox* _langCombo{nullptr};
     QCheckBox* _darkModeCheck{nullptr};
+    // 主题色：一组预设色块（互斥）+ 自定义颜色选择器入口。
+    QString _accentColor;
+    QVector<QToolButton*> _accentPresets;
+    QButtonGroup* _accentGroup{nullptr};
+    QPushButton* _accentCustomButton{nullptr};
+    QLabel* _accentValueLabel{nullptr};
     QComboBox* _uiFontZhCombo{nullptr};
     QComboBox* _uiFontEnCombo{nullptr};
 

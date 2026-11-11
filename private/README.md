@@ -120,6 +120,13 @@ to Gitee Releases via the API. No repo name is hard-coded.
 
 - **Tree-structured preferences**: theme, UI language, tab bar, auto-completion, matching
   highlight, CJK/Latin UI fonts, editor behaviour — only real, backed options, no placeholders.
+- **Accent color** (Appearance page): seven presets (default Obsidian purple, macOS blue,
+  Ubuntu orange, GNOME blue, green, rose, amber) plus a custom `QColorDialog`. The token drives
+  QSS selection/link/highlight rules, `QToolButton:checked`, input focus borders, tab color bars
+  and the `QPalette::Link` / `QPalette::Highlight` roles in both dark and light themes. Hard-coded
+  purples were replaced by four `@ACCENT*` placeholders resolved in `finishStyleSheet()`; the
+  default base reproduces the original tokens exactly, so opting out changes nothing. Stored under
+  `prefs/accentColor`, validated on load, and applied at startup.
 - **Style configurator**: per language × style slot colours, bold/italic, font family and size.
 - **Shortcut mapper** generated from real menu actions, editable with conflict detection and reset.
 - **Fold-level menu** (levels 1–8), whitespace operations, sort, case conversion, bookmarks.
