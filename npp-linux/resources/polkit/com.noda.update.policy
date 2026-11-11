@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  路线 C：只放开“安装 Noda 更新包”这一个动作，并把它绑定到固定助手
+  /usr/libexec/noda-install-deb。这样 pkexec 只能执行该程序，
+  而不是任意 root 命令，显著收窄提权面。
+
+  allow_active=auth_admin_keep：活动会话需管理员认证（图形密码框），
+  并在短时间窗口内复用授权，避免连续操作反复弹框。
+-->
+<policyconfig>
+  <vendor>Noda</vendor>
+  <vendor_url>https://gitee.com/twypx/notepad-plus-plus-linux</vendor_url>
+
+  <action id="com.noda.update.install">
+    <description>Install a Noda update package</description>
+    <message>Authentication is required to install the Noda update</message>
+    <icon_name>noda</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/noda-install-deb</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>

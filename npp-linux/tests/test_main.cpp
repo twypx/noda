@@ -23,6 +23,7 @@
 #include "test_hex_view.h"
 #include "test_localization.h"
 #include "test_diff_engine.h"
+#include "test_update.h"
 
 int main(int argc, char* argv[]) {
     // 强制隔离测试沙箱：无论外部是否提供 XDG_CONFIG_HOME，都确保指向独立的空目录，
@@ -104,6 +105,9 @@ int main(int argc, char* argv[]) {
     resetConfigSandbox();
     TestDiffEngine testDiffEngine;
     failures += QTest::qExec(&testDiffEngine, argc, argv);
+    resetConfigSandbox();
+    TestUpdate testUpdate;
+    failures += QTest::qExec(&testUpdate, argc, argv);
 
     return failures == 0 ? 0 : 1;
 }

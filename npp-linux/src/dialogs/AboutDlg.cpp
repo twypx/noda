@@ -125,6 +125,12 @@ void AboutDlg::setupUi() {
 
     // 底部按钮
     auto* buttonBox = new QDialogButtonBox(this);
+    auto* updateBtn = buttonBox->addButton(QStringLiteral("检查更新(&U)"),
+                                           QDialogButtonBox::ActionRole);
+    connect(updateBtn, &QPushButton::clicked, this, [this]() {
+        _updatesRequested = true;
+        accept();
+    });
     auto* okBtn = buttonBox->addButton(QStringLiteral("确定(&O)"), QDialogButtonBox::AcceptRole);
     okBtn->setDefault(true);
     connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);

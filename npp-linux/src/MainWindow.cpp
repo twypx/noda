@@ -46,6 +46,7 @@
 #include "dialogs/StyleOverride.h"
 #include "dialogs/ShortcutManager.h"
 #include "dialogs/AboutDlg.h"
+#include "dialogs/UpdateDialog.h"
 #include "widgets/CompareWidget.h"
 #include "utils/SingleInstance.h"
 
@@ -700,6 +701,8 @@ void MainWindow::setupSettingsMenu() {
 
 void MainWindow::setupHelpMenu() {
     auto* menu = menuBar()->addMenu("帮助(&H)");
+    _actCheckUpdates = menu->addAction("检查更新(&U)...", this, &MainWindow::onCheckForUpdates);
+    _actCheckUpdates->setObjectName(QStringLiteral("actCheckUpdates"));
     _actAbout = menu->addAction(toolBarIcon(QStringLiteral("info"), _prefs.darkMode),
                                 "关于 Noda(&A)...", this, &MainWindow::onAbout);
     _actAbout->setShortcut(QKeySequence(Qt::Key_F1));
@@ -707,6 +710,14 @@ void MainWindow::setupHelpMenu() {
 
 void MainWindow::onAbout() {
     AboutDlg dlg(this);
+    dlg.exec();
+    // “关于”里点“检查更新”：先关掉关于，再打开更新窗口，避免两层模态叠在一起。
+    if (dlg.updatesRequested())
+        onCheckForUpdates();
+}
+
+void MainWindow::onCheckForUpdates() {
+    UpdateDialog dlg(this);
     dlg.exec();
 }
 

@@ -82,9 +82,11 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          # build_deb.sh / build_appimage.sh 把产物统一放到「仓库根」的 dist/ 下
+          # （REPO_ROOT=脚本目录/..），不是 npp-linux/dist/。
           files: |
-            npp-linux/dist/*.deb
-            npp-linux/dist/[Nn]oda-*.AppImage
+            dist/*.deb
+            dist/[Nn]oda-*.AppImage
             npp-linux/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

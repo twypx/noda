@@ -1,0 +1,71 @@
+#!/bin/sh
+# Noda 更新安装助手（由 polkit 动作 com.noda.update.install 以 root 调用）。
+#
+# 设计原则：宁可拒绝，也不接受无法验证的输入。
+#   1. 只接受一个参数，且必须是 “*.deb” 的绝对路径、普通文件、非符号链接；
+#   2. 文件必须属于发起调用的用户（pkexec 注入 PKEXEC_UID），防止读取他人文件；
+#   3. 包名必须是 noda（即使校验和文件被伪造，也装不进别的包）；
+#   4. 最后交给 apt 安装，自动补齐依赖并避免 debconf 交互。
+#
+# 该脚本必须是 root:root 0755、且普通用户不可写，否则本身就会成为提权点。
+set -eu
+
+# 固定 PATH，不受调用方环境影响。
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+umask 022
+
+log() { printf '[noda-install-deb] %s\n' "$*" >&2; }
+
+if [ "$#" -ne 1 ]; then
+    log "用法: noda-install-deb <path/to/noda_*.deb>"
+    exit 64
+fi
+
+DEB="$1"
+
+case "$DEB" in
+    /*.deb) ;;
+    *)
+        log "拒绝：参数必须是以 .deb 结尾的绝对路径"
+        exit 65
+        ;;
+esac
+
+if [ ! -e "$DEB" ]; then
+    log "拒绝：文件不存在"
+    exit 66
+fi
+if [ -L "$DEB" ]; then
+    log "拒绝：不允许符号链接"
+    exit 67
+fi
+if [ ! -f "$DEB" ]; then
+    log "拒绝：不是普通文件"
+    exit 68
+fi
+
+# 只允许安装调用者自己拥有的文件（pkexec 会设置 PKEXEC_UID）。
+if [ -n "${PKEXEC_UID:-}" ]; then
+    owner="$(stat -c '%u' "$DEB" 2>/dev/null || echo '')"
+    if [ "$owner" != "$PKEXEC_UID" ]; then
+        log "拒绝：文件不属于发起调用的用户"
+        exit 69
+    fi
+fi
+
+# 包身份校验：必须是 noda。
+pkg="$(dpkg-deb -f "$DEB" Package 2>/dev/null || true)"
+if [ "$pkg" != "noda" ]; then
+    log "拒绝：不是 Noda 安装包（Package=${pkg:-<无法读取>}）"
+    exit 70
+fi
+
+log "开始安装 ${DEB}"
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    -o Dpkg::Options::=--force-confdef \
+    -o Dpkg::Options::=--force-confold \
+    "$DEB"
+
+log "安装完成"
+exit 0

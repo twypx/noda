@@ -173,6 +173,9 @@ set(APP_SOURCES
     src/utils/SingleInstance.cpp
     src/utils/DiffEngine.cpp
     src/utils/ConfigMigration.cpp
+    src/utils/UpdateChecker.cpp
+    src/utils/UpdateInstaller.cpp
+    src/dialogs/UpdateDialog.cpp
 )
 
 # 主程序与回归测试复用同一批应用对象文件：抽成 OBJECT 库，避免把 22 个 .cpp 编两遍。
@@ -251,6 +254,18 @@ install(FILES
     "${POWEREDITOR_SRC}/langs.model.xml"
     "${POWEREDITOR_SRC}/stylers.model.xml"
     DESTINATION ${CMAKE_INSTALL_DATADIR}/${NPP_PKG_NAME})
+
+# ---------------------------------------------------------------------------
+# 自动更新（路线 C）：polkit 动作 + 受限 root 助手。
+#
+# 只放开“安装 Noda 更新包”这一个特权动作，并把它绑定到固定助手路径，
+# 而不是让 App 直接 pkexec 任意命令。助手由 dpkg 以 root:root 安装，
+# 自身再做路径/属主/包名校验（见 resources/polkit/noda-install-deb）。
+# ---------------------------------------------------------------------------
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/polkit/com.noda.update.policy"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/polkit-1/actions)
+install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/resources/polkit/noda-install-deb"
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
 
 # 官方主题包（直接取自上游源码 PowerEditor/installer/themes）：
 # 构建目录留一份供运行/测试直接命中，安装时进 share/noda/themes。

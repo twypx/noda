@@ -227,6 +227,7 @@ private slots:
 
     // 帮助菜单
     void onAbout();
+    void onCheckForUpdates();
 
     // 文件对比
     void onCompareFiles();
@@ -361,6 +362,7 @@ private:
     QAction* _actReadOnly{nullptr};
     QAction* _actDarkMode{nullptr};
     QAction* _actAbout{nullptr};
+    QAction* _actCheckUpdates{nullptr};
     QAction* _actViewHex{nullptr};
     QAction* _actCompare{nullptr};
     QAction* _toolCompareToggle{nullptr};  // 工具栏可切换按钮，与菜单入口共享状态

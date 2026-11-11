@@ -11,4 +11,15 @@ if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || true
 fi
 
+# 自动更新用的受限助手必须是 root:root 0755，且策略文件 root:root 0644。
+# dpkg 通常已按包内元数据设好属主，这里再兜底一次，避免异常解包导致提权面扩大。
+if [ -f /usr/libexec/noda-install-deb ]; then
+    chown root:root /usr/libexec/noda-install-deb 2>/dev/null || true
+    chmod 0755 /usr/libexec/noda-install-deb 2>/dev/null || true
+fi
+if [ -f /usr/share/polkit-1/actions/com.noda.update.policy ]; then
+    chown root:root /usr/share/polkit-1/actions/com.noda.update.policy 2>/dev/null || true
+    chmod 0644 /usr/share/polkit-1/actions/com.noda.update.policy 2>/dev/null || true
+fi
+
 exit 0
