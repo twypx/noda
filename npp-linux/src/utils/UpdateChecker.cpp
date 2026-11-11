@@ -2,6 +2,7 @@
 
 #include <QCryptographicHash>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -78,8 +79,9 @@ QHash<QString, QString> NodaUpdate::parseChecksums(const QByteArray& data) {
         QString name = QString::fromUtf8(line.mid(sep + 1)).trimmed();
         if (name.startsWith(QLatin1Char('*')))
             name.remove(0, 1); // "hash *file" 二进制模式标记
-        if (name.startsWith(QStringLiteral("./")))
-            name.remove(0, 2);
+        // sha256sum 可能写成 "../dist/foo" / "dist/foo" / "/abs/foo"；
+        // 统一取 basename，才能与 Release 资产名（纯文件名）对上。
+        name = QFileInfo(name).fileName();
         if (!name.isEmpty())
             result.insert(name, hash);
     }

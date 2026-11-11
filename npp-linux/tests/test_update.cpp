@@ -26,16 +26,22 @@ void TestUpdate::versionComparison() {
 void TestUpdate::checksumParsing() {
     const QString hashA(64, QLatin1Char('a'));
     const QString hashB(64, QLatin1Char('B'));
+    const QString hashC(64, QLatin1Char('c'));
     const QByteArray data =
-        (hashA + QStringLiteral("  noda_1.0.24-1_amd64.deb\n") + hashB +
-         QStringLiteral(" *./Noda-1.0.24-x86_64.AppImage\n") +
+        // 真实场景：workflow 里 `sha256sum ../dist/*.deb` 会写成带路径的名字。
+        (hashA + QStringLiteral("  ../dist/noda_1.0.24-1_amd64.deb\n") + hashB +
+         QStringLiteral(" *./Noda-1.0.24-x86_64.AppImage\n") + hashC +
+         QStringLiteral("  /tmp/build/dist/noda_extra.deb\n") +
          QStringLiteral("# 注释行应被忽略\n") + QStringLiteral("abc  garbage.txt\n"))
             .toUtf8();
 
     const QHash<QString, QString> sums = NodaUpdate::parseChecksums(data);
+    // 带 "../dist/" 前缀的条目也必须归一化为纯文件名后可按资产名查到。
     QCOMPARE(sums.value(QStringLiteral("noda_1.0.24-1_amd64.deb")), hashA);
     // 去掉 "*" 与 "./" 前缀，且哈希统一小写。
     QCOMPARE(sums.value(QStringLiteral("Noda-1.0.24-x86_64.AppImage")), hashB.toLower());
+    // 绝对路径同样归一化为 basename。
+    QCOMPARE(sums.value(QStringLiteral("noda_extra.deb")), hashC);
     // 非 64 位十六进制的行必须忽略。
     QVERIFY(!sums.contains(QStringLiteral("garbage.txt")));
 }
