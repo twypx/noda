@@ -146,7 +146,7 @@ fi
 # ---- 6. 构建 deb -----------------------------------------------------------
 echo ">>> 开始构建 deb（全量重编，约数分钟）..."
 ./npp-linux/build_deb.sh
-DEB="$(ls -1t ./npp-linux/build-deb/*.deb | head -1)"
+DEB="$(ls -1t ./dist/*.deb | head -1)"
 DEB_NAME="$(basename "$DEB")"
 
 # 再核对一次实际产物的版本，防止 CMake 缓存导致打出旧版本
@@ -160,7 +160,7 @@ echo ">>> 产物: ${DEB_NAME} ($(du -h "$DEB" | cut -f1))"
 # ---- 6b. 构建 AppImage ----------------------------------------------------
 echo ">>> 开始构建 AppImage ..."
 ./npp-linux/build_appimage.sh
-APPIMAGE="$(ls -1t ./npp-linux/noda-*.AppImage 2>/dev/null | head -1)"
+APPIMAGE="$(ls -1t ./dist/noda-*.AppImage 2>/dev/null | head -1)"
 if [[ -z "$APPIMAGE" ]]; then
     echo "错误: 未找到生成的 AppImage" >&2
     exit 1

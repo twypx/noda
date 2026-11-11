@@ -204,7 +204,6 @@ This repository vendors every third-party source needed to build, so the directo
 
 ## Documentation
 
-- English technical reference: **[npp-linux/README.md](npp-linux/README.md)** (default)
 - Chinese product guide: **[docs/README.zh-CN.md](docs/README.zh-CN.md)**
 - Contributing (English): **[CONTRIBUTING.md](CONTRIBUTING.md)** — includes `good first issue` entry-level tasks
 - Contributing (Chinese): **[docs/CONTRIBUTING.zh-CN.md](docs/CONTRIBUTING.zh-CN.md)**

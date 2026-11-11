@@ -60,7 +60,7 @@ jobs:
       - name: Generate Checksums
         run: |
           cd npp-linux
-          sha256sum build-deb/*.deb noda-*.AppImage > SHA256SUMS.txt
+          sha256sum ../dist/*.deb ../dist/noda-*.AppImage > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Determine Release Tag
@@ -81,8 +81,8 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            npp-linux/build-deb/*.deb
-            npp-linux/noda-*.AppImage
+            npp-linux/dist/*.deb
+            npp-linux/dist/noda-*.AppImage
             npp-linux/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

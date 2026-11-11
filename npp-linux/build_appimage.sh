@@ -114,10 +114,15 @@ echo ">>> 生成 AppImage ..."
 VERSION="$(grep -oE 'VERSION +[0-9]+\.[0-9]+\.[0-9]+' "${SCRIPT_DIR}/CMakeLists.txt" \
     | head -1 | awk '{print $2}')"
 export VERSION
-"$LINUXDEPLOY" --appdir "${APPDIR}" --plugin qt --output appimage \
-    --custom-appdir "${APPDIR}"
-
-OUT="$(ls -1t "${SCRIPT_DIR}/noda-"*"${APPIMAGE_ARCH}.AppImage" 2>/dev/null | head -1)"
+DIST_DIR="${REPO_ROOT}/dist"
+mkdir -p "${DIST_DIR}"
+# 在临时目录里跑 linuxdeploy（避免把 .linuxdeploy 缓存丢进 dist/），再把生成的
+# AppImage 收拢到仓库根 dist/ 下。
+TMP_OUT="$(mktemp -d)"
+( cd "${TMP_OUT}" && "$LINUXDEPLOY" --appdir "${APPDIR}" --plugin qt --output appimage )
+mv -f "${TMP_OUT}"/noda-*"${APPIMAGE_ARCH}".AppImage "${DIST_DIR}/" 2>/dev/null || true
+rm -rf "${TMP_OUT}"
+OUT="$(ls -1t "${DIST_DIR}"/noda-*"${APPIMAGE_ARCH}".AppImage 2>/dev/null | head -1)"
 echo "=== 完成 ==="
-echo "    AppImage: ${OUT:-${SCRIPT_DIR}/noda-*.AppImage}"
+echo "    AppImage: ${OUT:-${DIST_DIR}/noda-*.AppImage}"
 echo "    安装即用: chmod +x <AppImage> && ./<AppImage>"

@@ -31,3 +31,6 @@ private/
 
 # 一键打包脚本产出的聚合目录
 artifacts/
+
+# 打包产物：deb / AppImage 聚合目录（本地生成，不入库）
+dist/

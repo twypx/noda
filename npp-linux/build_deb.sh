@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# 打 .deb 安装包。产物在 build-deb/ 下，文件名形如
+# 打 .deb 安装包。最终产物移动到仓库根 dist/ 下，文件名形如
 #   noda_1.0.0-1_amd64.deb
 #
 # 用法：
 #   ./build_deb.sh          # 打当前架构的包
-#   sudo dpkg -i build-deb/*.deb
+#   sudo dpkg -i ../dist/*.deb
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build-deb"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DIST_DIR="${REPO_ROOT}/dist"
 
 echo "=== Noda Debian 打包脚本 ==="
 
@@ -41,6 +43,8 @@ echo ">>> 生成 deb 包..."
 cpack -G DEB
 
 DEB_FILE="$(ls -1t ./*.deb | head -1)"
-echo "=== 打包完成: ${BUILD_DIR}/${DEB_FILE#./} ==="
+mkdir -p "${DIST_DIR}"
+mv -f "${DEB_FILE}" "${DIST_DIR}/"
+echo "=== 打包完成: ${DIST_DIR}/$(basename "${DEB_FILE}") ==="
 echo ">>> 安装: sudo apt install ./$(basename "${DEB_FILE}")   # 用 apt 装可自动补齐依赖"
 echo ">>> 卸载: sudo apt remove noda"

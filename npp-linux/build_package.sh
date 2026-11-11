@@ -9,8 +9,8 @@
 #   ./build_package.sh -h            # 查看帮助
 #
 # 产物：
-#   build-deb/noda_*.deb
-#   noda-<arch>.AppImage
+#   ../dist/noda_*.deb
+#   ../dist/noda-<arch>.AppImage
 #   artifacts/SHA256SUMS.txt         （仅 --checksum 时）
 set -euo pipefail
 
@@ -40,7 +40,7 @@ DEB="" APPIMAGE=""
 if [[ $DO_DEB -eq 1 ]]; then
   echo "=== 构建 DEB ==="
   ./build_deb.sh
-  DEB="$(ls -1t build-deb/*.deb 2>/dev/null | head -1)"
+  DEB="$(ls -1t ../dist/*.deb 2>/dev/null | head -1)"
   echo ">>> DEB: ${DEB}"
   [[ $DO_CHECKSUM -eq 1 && -n "$DEB" ]] && sha256sum "$DEB" >> "${ARTIFACTS}/SHA256SUMS.txt"
 fi
@@ -48,7 +48,7 @@ fi
 if [[ $DO_APPIMAGE -eq 1 ]]; then
   echo "=== 构建 AppImage ==="
   ./build_appimage.sh
-  APPIMAGE="$(ls -1t noda-*.AppImage 2>/dev/null | head -1)"
+  APPIMAGE="$(ls -1t ../dist/noda-*.AppImage 2>/dev/null | head -1)"
   echo ">>> AppImage: ${APPIMAGE}"
   [[ $DO_CHECKSUM -eq 1 && -n "$APPIMAGE" ]] && sha256sum "$APPIMAGE" >> "${ARTIFACTS}/SHA256SUMS.txt"
 fi

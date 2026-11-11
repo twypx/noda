@@ -139,7 +139,6 @@ sudo apt install ./build-deb/noda_*_amd64.deb
 
 ## 文档
 
-- 英文技术文档（默认）：**[../npp-linux/README.md](../npp-linux/README.md)**
 - 英文 README：**[../README.md](../README.md)**
 - 贡献指南（中文）：**[../docs/CONTRIBUTING.zh-CN.md](../docs/CONTRIBUTING.zh-CN.md)**
 - 贡献指南（英文）：**[../CONTRIBUTING.md](../CONTRIBUTING.md)**

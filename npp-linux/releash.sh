@@ -143,7 +143,7 @@ fi
 # ---- 6. 构建 deb -----------------------------------------------------------
 echo ">>> 开始构建 deb（全量重编，约数分钟）..."
 ./npp-linux/build_deb.sh
-DEB="$(ls -1t ./npp-linux/build-deb/*.deb | head -1)"
+DEB="$(ls -1t ./dist/*.deb | head -1)"
 DEB_NAME="$(basename "$DEB")"
 
 # 再核对一次实际产物的版本，防止 CMake 缓存导致打出旧版本
