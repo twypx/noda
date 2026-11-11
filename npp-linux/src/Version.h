@@ -1,7 +1,7 @@
 #pragma once
 
 #ifndef NPP_VERSION_STRING
-#define NPP_VERSION_STRING "1.0.19"
+#define NPP_VERSION_STRING "1.0.20"
 #endif
 
 namespace NppVersion {
