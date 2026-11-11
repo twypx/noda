@@ -60,7 +60,9 @@ jobs:
       - name: Generate Checksums
         run: |
           cd npp-linux
-          sha256sum ../dist/*.deb ../dist/noda-*.AppImage > SHA256SUMS.txt
+          # linuxdeploy 依据 .desktop 的 Name=Noda 命名，产物为 Noda-<ver>-x86_64.AppImage
+          # （首字母大写），故用 [Nn] 兼容大小写，避免 “No such file or directory”。
+          sha256sum ../dist/*.deb ../dist/[Nn]oda-*.AppImage > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Determine Release Tag
@@ -82,7 +84,7 @@ jobs:
           generate_release_notes: true
           files: |
             npp-linux/dist/*.deb
-            npp-linux/dist/noda-*.AppImage
+            npp-linux/dist/[Nn]oda-*.AppImage
             npp-linux/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
