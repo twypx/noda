@@ -23,7 +23,7 @@ struct UpdateInfo {
     QString version;    // 去掉前缀的版本，形如 1.0.24
     QString notes;      // 发布说明（Markdown / 纯文本）
     QUrl releaseUrl;    // 发布页
-    QString source;     // "GitHub" / "Gitee"
+    QString source;     // 固定为 "GitHub"
     QVector<UpdateAsset> assets;
 };
 
@@ -37,6 +37,7 @@ namespace NodaUpdate {
 QVersionNumber parseVersion(const QString& text);
 
 // remote 是否比 current 更新；任一非法时保守返回 false（绝不把非法版本判成更新）。
+// 所有“是否可升级”的判断都走这里，因此天然拒绝降级与同版本。
 bool isNewer(const QString& current, const QString& remote);
 
 // sha256sum 文本 -> {文件名: 小写十六进制哈希}。
@@ -55,8 +56,8 @@ const UpdateAsset* findChecksumAsset(const QVector<UpdateAsset>& assets);
 
 } // namespace NodaUpdate
 
-// 异步查询 GitHub（主）→ Gitee（回退）的最新 release，并与当前版本比较。
-// 全程用户触发，不做任何后台静默行为。
+// 异步查询 GitHub 最新 release，并与当前版本比较。
+// 全程用户触发，不做任何后台静默行为；更新源固定为 GitHub。
 class UpdateChecker : public QObject {
     Q_OBJECT
 public:
@@ -73,17 +74,12 @@ signals:
     void failed(const QString& reason);
 
 private:
-    void queryGitHub();
-    void queryGitee();
-    void issueRequest(const QUrl& url, const QString& source);
-    void handleReply(QNetworkReply* reply, const QString& source);
-    void parseAndEmit(const QByteArray& data, const QString& source);
-    // GitHub 失败（网络/限流/404）时自动回退到 Gitee；两者都失败才发 failed。
-    void failOrFallback(const QString& source, const QString& reason);
-    QUrl releasePageUrl(const QString& tag, const QString& source) const;
+    void issueRequest(const QUrl& url);
+    void handleReply(QNetworkReply* reply);
+    void parseAndEmit(const QByteArray& data);
+    QUrl releasePageUrl(const QString& tag) const;
 
     QNetworkAccessManager* _nam{nullptr};
     bool _busy{false};
-    bool _triedGitee{false};
     QString _current;
 };

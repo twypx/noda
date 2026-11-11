@@ -1,4 +1,5 @@
 #include "UpdateInstaller.h"
+#include "Version.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -74,6 +75,14 @@ void UpdateInstaller::start(const UpdateInfo& info, Channel channel) {
     _info = info;
     _channel = channel;
     _running = true;
+
+    // 显式拒绝降级/同版本：即使上层判断被绕过，也不允许安装不高于当前的版本。
+    const QString currentVersion = QString::fromLatin1(NPP_VERSION_STRING);
+    if (!NodaUpdate::isNewer(currentVersion, info.tag)) {
+        fail(QStringLiteral("不支持降级：目标版本 %1 不高于当前版本 %2。")
+                 .arg(info.version, currentVersion));
+        return;
+    }
 
     if (channel == Channel::Unsupported) {
         fail(QStringLiteral("当前安装方式不支持自动更新，请打开下载页手动安装。"));
@@ -234,6 +243,25 @@ void UpdateInstaller::installDeb(const QString& path) {
     const QString package = QString::fromUtf8(probe.readAllStandardOutput()).trimmed();
     if (package != QStringLiteral("noda")) {
         fail(QStringLiteral("安装包包名不是 noda（实际：%1），已拒绝。").arg(package));
+        return;
+    }
+
+    // 版本二次校验：deb 的 Version（如 1.0.24-1）必须高于当前，杜绝降级/同版本。
+    QProcess versionProbe;
+    versionProbe.start(QStringLiteral("dpkg-deb"),
+                       {QStringLiteral("-f"), path, QStringLiteral("Version")});
+    if (!versionProbe.waitForFinished(10000) || versionProbe.exitCode() != 0) {
+        fail(QStringLiteral("无法解析 deb 版本信息。"));
+        return;
+    }
+    const QString debVersion =
+        QString::fromUtf8(versionProbe.readAllStandardOutput())
+            .trimmed()
+            .section(QLatin1Char('-'), 0, 0);
+    const QString currentVersion = QString::fromLatin1(NPP_VERSION_STRING);
+    if (!NodaUpdate::isNewer(currentVersion, debVersion)) {
+        fail(QStringLiteral("拒绝降级：安装包版本 %1 不高于当前版本 %2。")
+                 .arg(debVersion, currentVersion));
         return;
     }
 

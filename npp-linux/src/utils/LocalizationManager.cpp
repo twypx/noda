@@ -480,6 +480,13 @@ const QHash<QString, QString>& extraDictionary() {
         {QStringLiteral("未找到 pkexec/polkit，请安装 polkit 后重试。"),
          QStringLiteral("pkexec/polkit was not found. Install polkit and try again.")},
         {QStringLiteral("无法解析 deb 包信息。"), QStringLiteral("Failed to read the deb metadata.")},
+        {QStringLiteral("无法解析 deb 版本信息。"), QStringLiteral("Failed to read the deb version.")},
+        {QStringLiteral("不支持降级：目标版本 %1 不高于当前版本 %2。"),
+         QStringLiteral("Downgrades are not supported: target version %1 is not newer "
+                        "than the current version %2.")},
+        {QStringLiteral("拒绝降级：安装包版本 %1 不高于当前版本 %2。"),
+         QStringLiteral("Downgrade refused: package version %1 is not newer "
+                        "than the current version %2.")},
         {QStringLiteral("无法定位当前 AppImage 文件，已中止自动更新。"),
          QStringLiteral("Cannot locate the current AppImage; the update was aborted.")},
         {QStringLiteral("无法创建临时目录。"), QStringLiteral("Failed to create a temporary directory.")},

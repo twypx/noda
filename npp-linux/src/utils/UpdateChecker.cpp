@@ -12,11 +12,10 @@
 #include <QRegularExpression>
 
 namespace {
-// 更新源集中在此，改仓库只需改这一处。
+// 更新源固定为 GitHub；改仓库只需改这一处。
 constexpr const char* kGithubLatest =
     "https://api.github.com/repos/twypx/noda/releases/latest";
-constexpr const char* kGiteeLatest =
-    "https://gitee.com/api/v5/repos/twypx/notepad-plus-plus-linux/releases/latest";
+constexpr const char* kGithubReleases = "https://github.com/twypx/noda/releases";
 constexpr int kRequestTimeoutMs = 15000;
 } // namespace
 
@@ -37,6 +36,7 @@ bool NodaUpdate::isNewer(const QString& current, const QString& remote) {
         return false;
     if (cur.isNull())
         return true;
+    // 严格大于才算更新：等于/更旧都返回 false，天然拒绝降级。
     return QVersionNumber::compare(rem, cur) > 0;
 }
 
@@ -115,21 +115,12 @@ void UpdateChecker::check(const QString& currentVersion) {
     if (_busy)
         return;
     _busy = true;
-    _triedGitee = false;
     _current = currentVersion;
     emit checking();
-    queryGitHub();
+    issueRequest(QUrl(QString::fromLatin1(kGithubLatest)));
 }
 
-void UpdateChecker::queryGitHub() {
-    issueRequest(QUrl(QString::fromLatin1(kGithubLatest)), QStringLiteral("GitHub"));
-}
-
-void UpdateChecker::queryGitee() {
-    issueRequest(QUrl(QString::fromLatin1(kGiteeLatest)), QStringLiteral("Gitee"));
-}
-
-void UpdateChecker::issueRequest(const QUrl& url, const QString& source) {
+void UpdateChecker::issueRequest(const QUrl& url) {
     QNetworkRequest request(url);
     // GitHub 要求 UA；Accept 让它走 v3 JSON 稳定格式。
     request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("Noda-Updater/1.0"));
@@ -140,40 +131,44 @@ void UpdateChecker::issueRequest(const QUrl& url, const QString& source) {
     request.setTransferTimeout(kRequestTimeoutMs);
 
     QNetworkReply* reply = _nam->get(request);
-    connect(reply, &QNetworkReply::finished, this,
-            [this, reply, source]() { handleReply(reply, source); });
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() { handleReply(reply); });
 }
 
-void UpdateChecker::handleReply(QNetworkReply* reply, const QString& source) {
+void UpdateChecker::handleReply(QNetworkReply* reply) {
     const QByteArray body = reply->readAll();
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const bool ok = reply->error() == QNetworkReply::NoError && status < 400;
+    const QString error = reply->errorString();
     reply->deleteLater();
 
     if (!ok) {
-        // GitHub 限流(403)/无 release(404)/网络失败，都回退到 Gitee 再试一次。
-        failOrFallback(source, reply->errorString());
+        _busy = false;
+        // GitHub 限流(403)/无 release(404)/网络失败：如实上报，不做静默降级。
+        emit failed(error);
         return;
     }
-    parseAndEmit(body, source);
+    parseAndEmit(body);
 }
 
-void UpdateChecker::parseAndEmit(const QByteArray& data, const QString& source) {
+void UpdateChecker::parseAndEmit(const QByteArray& data) {
     QJsonParseError parseError{};
     const QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-        failOrFallback(source, QStringLiteral("发布信息解析失败"));
+        _busy = false;
+        emit failed(QStringLiteral("发布信息解析失败"));
         return;
     }
 
     const QJsonObject root = doc.object();
     const QString tag = root.value(QStringLiteral("tag_name")).toString().trimmed();
     if (tag.isEmpty()) {
-        failOrFallback(source, QStringLiteral("发布信息缺少版本号"));
+        _busy = false;
+        emit failed(QStringLiteral("发布信息缺少版本号"));
         return;
     }
 
     _busy = false;
+    // 只有严格更新的版本才算“有更新”；相同或更旧（降级）都视为已是最新。
     if (!NodaUpdate::isNewer(_current, tag)) {
         emit upToDate(_current);
         return;
@@ -185,10 +180,10 @@ void UpdateChecker::parseAndEmit(const QByteArray& data, const QString& source) 
     if (info.version.startsWith(QLatin1Char('v')) || info.version.startsWith(QLatin1Char('V')))
         info.version.remove(0, 1);
     info.notes = root.value(QStringLiteral("body")).toString();
-    info.source = source;
+    info.source = QStringLiteral("GitHub");
 
     const QString htmlUrl = root.value(QStringLiteral("html_url")).toString();
-    info.releaseUrl = htmlUrl.isEmpty() ? releasePageUrl(tag, source) : QUrl(htmlUrl);
+    info.releaseUrl = htmlUrl.isEmpty() ? releasePageUrl(tag) : QUrl(htmlUrl);
 
     const QJsonArray assets = root.value(QStringLiteral("assets")).toArray();
     for (const QJsonValue& value : assets) {
@@ -204,18 +199,7 @@ void UpdateChecker::parseAndEmit(const QByteArray& data, const QString& source) 
     emit updateAvailable(info);
 }
 
-void UpdateChecker::failOrFallback(const QString& source, const QString& reason) {
-    if (source == QLatin1String("GitHub") && !_triedGitee) {
-        _triedGitee = true;
-        queryGitee();
-        return;
-    }
-    _busy = false;
-    emit failed(reason);
-}
-
-QUrl UpdateChecker::releasePageUrl(const QString& tag, const QString& source) const {
-    if (source == QLatin1String("GitHub"))
-        return QUrl(QStringLiteral("https://github.com/twypx/noda/releases/tag/") + tag);
-    return QUrl(QStringLiteral("https://gitee.com/twypx/notepad-plus-plus-linux/releases/tag/") + tag);
+QUrl UpdateChecker::releasePageUrl(const QString& tag) const {
+    return QUrl(QString::fromLatin1(kGithubReleases) + QLatin1Char('/') + QStringLiteral("tag") +
+                QLatin1Char('/') + tag);
 }

@@ -92,7 +92,7 @@ void AboutDlg::setupUi() {
     detailsLayout->addWidget(envLabel);
 
     auto* repoLabel = new QLabel(
-        QStringLiteral("Repository: <a href=\"https://gitee.com/twypx/notepad-plus-plus-linux\">Gitee: twypx/notepad-plus-plus-linux</a>"),
+        QStringLiteral("Repository: <a href=\"https://github.com/twypx/noda\">GitHub: twypx/noda</a>"),
         this);
     repoLabel->setOpenExternalLinks(true);
     detailsLayout->addWidget(repoLabel);
