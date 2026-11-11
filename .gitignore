@@ -34,3 +34,9 @@ artifacts/
 
 # 打包产物：deb / AppImage 聚合目录（本地生成，不入库）
 dist/
+
+# 打包工具链：build_appimage.sh 按需下载的 linuxdeploy / plugin，非源码
+npp-linux/tools/*.AppImage
+
+# 构建产出的 AppImage（不应入库）
+Noda-*.AppImage
