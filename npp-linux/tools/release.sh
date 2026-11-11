@@ -225,20 +225,54 @@ else
 fi
 
 # ---- 10. 上传 deb / AppImage / 校验和 --------------------------------------
-upload_asset() {  # path -> 打印 browser_download_url
+# 先拉取该 Release 已有的附件清单（name<TAB>url）：
+#   - 上次上传中途中断时，重跑不会重复上传（避免同名附件冲突）
+#   - 只补传缺失的文件
+EXISTING_ASSETS="$(curl -sS --http1.1 "${API}/releases/${RELEASE_ID}/attach_files?access_token=${GITEE_TOKEN}" 2>/dev/null \
+    | python3 -c '
+import sys, json
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    data = []
+for a in data:
+    print("%s\t%s" % (a.get("name", ""), a.get("browser_download_url", "") or ""))
+' 2>/dev/null || true)"
+
+upload_asset() {  # path -> 打印 browser_download_url；已存在同名附件则跳过
     local f="$1" fname="$(basename "$1")"
-    echo ">>> 上传 ${fname} ..."
-    local resp
-    resp="$(curl -sS -X POST "${API}/releases/${RELEASE_ID}/attach_files" \
-        -F "access_token=${GITEE_TOKEN}" \
-        -F "file=@${f}")"
-    local url="$(echo "$resp" | json_field browser_download_url)"
-    if [[ -z "$url" ]]; then
-        echo "错误: 附件上传失败（${fname}），接口返回：" >&2
-        echo "$resp" >&2
-        exit 1
+    if awk -F'\t' -v n="$fname" '$1==n{found=1} END{exit !found}' <<< "$EXISTING_ASSETS"; then
+        local existing
+        existing="$(awk -F'\t' -v n="$fname" '$1==n{print $2; exit}' <<< "$EXISTING_ASSETS")"
+        echo ">>> 已存在，跳过: ${fname}" >&2
+        printf '%s\n' "$existing"
+        return 0
     fi
-    echo "$url"
+    echo ">>> 上传 ${fname} ..." >&2
+    local resp url attempt
+    for attempt in 1 2 3; do
+        # 大文件（约 38MB 的 AppImage）易被 Gitee 网关中途断开（curl 52）。
+        # --http1.1 规避 HTTP/2 流重置；--retry-all-errors 覆盖连接被重置的情况。
+        resp="$(curl -sS --http1.1 --connect-timeout 30 \
+            --retry 5 --retry-delay 5 --retry-all-errors \
+            -H "Expect:" \
+            -X POST "${API}/releases/${RELEASE_ID}/attach_files" \
+            -F "access_token=${GITEE_TOKEN}" \
+            -F "file=@${f}" 2>/dev/null || true)"
+        url="$(printf '%s' "$resp" | python3 -c 'import sys,json
+try: d=json.load(sys.stdin)
+except Exception: d={}
+print(d.get("browser_download_url","") or "")' 2>/dev/null || true)"
+        if [[ -n "$url" ]]; then
+            printf '%s\n' "$url"
+            return 0
+        fi
+        echo "    第 ${attempt} 次上传失败（响应为空/连接被重置），稍后重试..." >&2
+        sleep 5
+    done
+    echo "错误: 附件上传失败（${fname}），最后一次返回：" >&2
+    printf '%s\n' "$resp" >&2
+    exit 1
 }
 
 # 校验和：两份包写进同一个 SHA256SUMS，便于用户一次性校验。
