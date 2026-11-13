@@ -575,6 +575,11 @@ void EditorView::initEditorDefaults() {
     send(SCI_SETWRAPMODE, SC_WRAP_NONE);
     send(SCI_SETIDLESTYLING, SC_IDLESTYLING_TOVISIBLE);
 
+    // 横向滚动宽度跟踪：Scintilla 默认 scrollWidth 固定 2000px 且不跟踪内容宽度，
+    // 超长行（关闭自动换行时的 markdown 长段落等）滚到最右仍会被裁掉。
+    // 开启跟踪后由绘制时测得的 lineWidthMaxSeen 动态扩展 scrollWidth。
+    send(SCI_SETSCROLLWIDTHTRACKING, 1);
+
     send(SCI_SETTABWIDTH, 4);
     send(SCI_SETUSETABS, 0);
     send(SCI_SETINDENT, 4);

@@ -11,6 +11,7 @@
 #include "test_config.h"
 #include "test_style_config.h"
 #include "test_shortcuts.h"
+#include "test_scroll.h"
 #include "test_fold.h"
 #include "test_folder_tree.h"
 #include "test_folder_tree_main_window.h"
@@ -69,6 +70,9 @@ int main(int argc, char* argv[]) {
     resetConfigSandbox();
     TestShortcuts testShortcuts;
     failures += QTest::qExec(&testShortcuts, argc, argv);
+    resetConfigSandbox();
+    TestScroll testScroll;
+    failures += QTest::qExec(&testScroll, argc, argv);
     resetConfigSandbox();
     TestFold testFold;
     failures += QTest::qExec(&testFold, argc, argv);
