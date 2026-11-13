@@ -103,3 +103,85 @@ void TestUpdate::sha256OfDataAndFile() {
     QVERIFY(NodaUpdate::sha256File(QStringLiteral("/nonexistent/noda.deb"), &error).isEmpty());
     QVERIFY(!error.isEmpty());
 }
+
+void TestUpdate::sourceSelection() {
+    // 中文界面 → GitHub
+    const auto zh = NodaUpdate::selectUpdateSource(QStringLiteral("zh_CN"));
+    QCOMPARE(zh.kind, NodaUpdate::UpdateSource::GitHub);
+    QCOMPARE(zh.label, QStringLiteral("GitHub"));
+    QCOMPARE(zh.assetUrlKey, QStringLiteral("browser_download_url"));
+    QVERIFY(!zh.latestUrl.isEmpty());
+
+    // 英文界面 → Gitee（需求：en_US→gitee）
+    const auto en = NodaUpdate::selectUpdateSource(QStringLiteral("en_US"));
+    QCOMPARE(en.kind, NodaUpdate::UpdateSource::Gitee);
+    QCOMPARE(en.label, QStringLiteral("Gitee"));
+    QCOMPARE(en.assetUrlKey, QStringLiteral("download_url"));
+    QVERIFY(en.latestUrl.isEmpty());
+    QVERIFY(!en.releasesUrl.isEmpty());
+
+    // 其它（含默认空串）→ GitHub
+    QCOMPARE(NodaUpdate::selectUpdateSource(QString()).kind,
+             NodaUpdate::UpdateSource::GitHub);
+    QCOMPARE(NodaUpdate::selectUpdateSource(QStringLiteral("zh_TW")).kind,
+             NodaUpdate::UpdateSource::GitHub);
+}
+
+void TestUpdate::giteeResponseParsing() {
+    // 构造一条 Gitee 风格的发布：数组包裹，资产下载链接字段为 download_url。
+    QJsonObject asset;
+    asset[QStringLiteral("name")] = QStringLiteral("noda_1.0.99-1_amd64.deb");
+    asset[QStringLiteral("download_url")] = QStringLiteral("https://gitee.com/x/noda.deb");
+    asset[QStringLiteral("size")] = 12345;
+
+    QJsonObject release;
+    release[QStringLiteral("tag_name")] = QStringLiteral("v1.0.99");
+    release[QStringLiteral("body")] = QStringLiteral("release notes");
+    release[QStringLiteral("html_url")] =
+        QStringLiteral("https://gitee.com/twypx/notepad-plus-plus-linux/releases/tag/v1.0.99");
+    release[QStringLiteral("assets")] = QJsonArray{asset};
+
+    const QJsonDocument doc(QJsonArray{release});
+    const auto src = NodaUpdate::selectUpdateSource(QStringLiteral("en_US"));
+
+    UpdateInfo info;
+    const auto r =
+        NodaUpdate::parseUpdateResponse(doc.toJson(), src, QStringLiteral("1.0.0"), info);
+    QCOMPARE(r, NodaUpdate::ReleaseParseResult::Ok);
+    QCOMPARE(info.source, QStringLiteral("Gitee"));
+    QCOMPARE(info.version, QStringLiteral("1.0.99"));
+    QCOMPARE(info.assets.size(), 1);
+    QCOMPARE(info.assets.first().name, QStringLiteral("noda_1.0.99-1_amd64.deb"));
+    QCOMPARE(info.assets.first().url.toString(), QStringLiteral("https://gitee.com/x/noda.deb"));
+    QCOMPARE(info.assets.first().size, qint64(12345));
+
+    // 非更新（远端更旧/相同）应判为 NotAnUpdate，而非误报更新。
+    UpdateInfo stale;
+    const auto r2 =
+        NodaUpdate::parseUpdateResponse(doc.toJson(), src, QStringLiteral("1.1.0"), stale);
+    QCOMPARE(r2, NodaUpdate::ReleaseParseResult::NotAnUpdate);
+}
+
+void TestUpdate::githubResponseParsingUnchanged() {
+    // GitHub 风格：单对象，资产用 browser_download_url。
+    QJsonObject asset;
+    asset[QStringLiteral("name")] = QStringLiteral("noda_1.0.99-1_amd64.deb");
+    asset[QStringLiteral("browser_download_url")] = QStringLiteral("https://github.com/x/noda.deb");
+    asset[QStringLiteral("size")] = 999;
+
+    QJsonObject release;
+    release[QStringLiteral("tag_name")] = QStringLiteral("v1.0.99");
+    release[QStringLiteral("body")] = QStringLiteral("notes");
+    release[QStringLiteral("html_url")] = QStringLiteral("https://github.com/twypx/noda/releases/tag/v1.0.99");
+    release[QStringLiteral("assets")] = QJsonArray{asset};
+
+    const QJsonDocument doc(release);
+    const auto src = NodaUpdate::selectUpdateSource(QStringLiteral("zh_CN"));
+
+    UpdateInfo info;
+    const auto r =
+        NodaUpdate::parseUpdateResponse(doc.toJson(), src, QStringLiteral("1.0.0"), info);
+    QCOMPARE(r, NodaUpdate::ReleaseParseResult::Ok);
+    QCOMPARE(info.source, QStringLiteral("GitHub"));
+    QCOMPARE(info.assets.first().url.toString(), QStringLiteral("https://github.com/x/noda.deb"));
+}

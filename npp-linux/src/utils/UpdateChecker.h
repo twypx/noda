@@ -23,7 +23,7 @@ struct UpdateInfo {
     QString version;    // 去掉前缀的版本，形如 1.0.24
     QString notes;      // 发布说明（Markdown / 纯文本）
     QUrl releaseUrl;    // 发布页
-    QString source;     // 固定为 "GitHub"
+    QString source;     // 更新源标签：GitHub / Gitee
     QVector<UpdateAsset> assets;
 };
 
@@ -54,16 +54,38 @@ const UpdateAsset* findAssetBySuffix(const QVector<UpdateAsset>& assets, const Q
 // 找校验和资产：名字里含 SHA256SUM 即可（兼容 SHA256SUMS / SHA256SUMS.txt）。
 const UpdateAsset* findChecksumAsset(const QVector<UpdateAsset>& assets);
 
+// 更新源：GitHub 与 Gitee 的接口形态不同，集中在一处描述。
+enum class UpdateSource { GitHub, Gitee };
+
+struct UpdateSourceConfig {
+    UpdateSource kind{UpdateSource::GitHub};
+    QString latestUrl;        // GitHub 专用：含 /latest 的单对象端点
+    QString releasesUrl;      // Gitee 专用：返回数组、按时间倒序的发布列表
+    QString releasePageBase;  // 发布页根，形如 https://github.com/.../releases
+    QString assetUrlKey;      // 资产下载链接字段名（GitHub: browser_download_url / Gitee: download_url）
+    QString label;            // "GitHub" / "Gitee"
+};
+
+// 依据界面语言选择更新源：中文界面用 GitHub，英文界面用 Gitee。
+UpdateSourceConfig selectUpdateSource(const QString& language);
+
+enum class ReleaseParseResult { Ok, NotAnUpdate, Invalid };
+
+// 解析更新源返回的 JSON：GitHub 为单对象；Gitee 为数组（取最新一条）。
+// 仅当返回 Ok 时 out 有效（已填入资产、说明、source 与 releaseUrl）。
+ReleaseParseResult parseUpdateResponse(const QByteArray& data, const UpdateSourceConfig& src,
+                                       const QString& currentVersion, UpdateInfo& out);
+
 } // namespace NodaUpdate
 
-// 异步查询 GitHub 最新 release，并与当前版本比较。
-// 全程用户触发，不做任何后台静默行为；更新源固定为 GitHub。
+// 异步查询更新源最新 release，并与当前版本比较。
+// 全程用户触发，不做任何后台静默行为；更新源按界面语言在 GitHub / Gitee 间切换。
 class UpdateChecker : public QObject {
     Q_OBJECT
 public:
     explicit UpdateChecker(QObject* parent = nullptr);
 
-    // 开始检查；若正在检查则忽略重复调用。
+    // 开始检查；若正在检查则忽略重复调用。更新源按当前界面语言选择。
     void check(const QString& currentVersion);
     bool isBusy() const { return _busy; }
 
@@ -76,10 +98,11 @@ signals:
 private:
     void issueRequest(const QUrl& url);
     void handleReply(QNetworkReply* reply);
-    void parseAndEmit(const QByteArray& data);
+    void parseAndEmit(const QByteArray& data, const NodaUpdate::UpdateSourceConfig& src);
     QUrl releasePageUrl(const QString& tag) const;
 
     QNetworkAccessManager* _nam{nullptr};
     bool _busy{false};
     QString _current;
+    NodaUpdate::UpdateSourceConfig _source;
 };
