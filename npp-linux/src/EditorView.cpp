@@ -934,8 +934,8 @@ bool EditorView::writeEncodedFile(const QString& path, const std::string& utf8,
 }
 
 bool EditorView::saveToFile(const QString& savePath) {
-    const QString targetPath = savePath.isEmpty()
-        ? QString::fromStdString(_buffer->getFilePath()) : savePath;
+    const QString oldPath = QString::fromStdString(_buffer->getFilePath());
+    const QString targetPath = savePath.isEmpty() ? oldPath : savePath;
     if (targetPath.isEmpty()) {
         _lastSaveError = QStringLiteral("未指定保存路径");
         return false;
@@ -949,6 +949,13 @@ bool EditorView::saveToFile(const QString& savePath) {
 
     send(SCI_SETSAVEPOINT);
     _buffer->setFilePath(targetPath.toStdString());
+    // 另存为/首次保存换了路径时，高亮语言必须跟随新扩展名重新检测；
+    // 原路径普通保存不重新检测，避免覆盖用户在「语言」菜单手动选择的语言。
+    if (targetPath != oldPath) {
+        const std::string ext = QFileInfo(targetPath).suffix().toStdString();
+        const std::string lang = StyleManager::instance().detectLanguageByExt(ext);
+        if (lang != _currentLang) applyLanguage(lang);
+    }
     _buffer->setModified(false);
     _buffer->setBackupDirty(false);
     emit documentModified(false);

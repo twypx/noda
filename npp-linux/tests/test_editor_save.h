@@ -21,4 +21,10 @@ private slots:
     void sortLinesSupportsCrAndUndo();
     // 行号边距宽度按位数缓存，避免高频字符/行变动时重复字体度量
     void lineNumberMarginWidthDigitsCaching();
+    // 另存为换了扩展名后，高亮语言必须跟随新扩展名重新检测
+    void saveAsNewFileAppliesLanguageByExtension();
+    void saveAsUnknownExtensionResetsToNormal();
+    // 原路径普通保存不得重新检测覆盖用户手动选择的语言
+    void plainSaveKeepsManuallyChosenLanguage();
+    void failedSaveAsDoesNotChangeLanguage();
 };

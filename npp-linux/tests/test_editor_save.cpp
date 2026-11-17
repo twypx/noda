@@ -189,5 +189,62 @@ void TestEditorSave::lineNumberMarginWidthDigitsCaching() {
     QVERIFY(ed.send(SCI_GETMARGINWIDTHN, 0) > width4);
 }
 
+void TestEditorSave::saveAsNewFileAppliesLanguageByExtension() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    EditorView ed;
+    ed.setTextFromUtf8("int main() { return 0; }\n");
+    QCOMPARE(ed.currentLanguage(), std::string("normal"));
+
+    QVERIFY(ed.saveToFile(dir.filePath("prog.cpp")));
+    QCOMPARE(ed.currentLanguage(), std::string("cpp"));
+    QVERIFY2(ed.send(SCI_GETSTYLEAT, 0) != 0,
+             "另存为 .cpp 后关键字必须真正着色，而不只是记录语言名");
+}
+
+void TestEditorSave::saveAsUnknownExtensionResetsToNormal() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    EditorView ed;
+    ed.setTextFromUtf8("int main() { return 0; }\n");
+    QVERIFY(ed.saveToFile(dir.filePath("a.cpp")));
+    QCOMPARE(ed.currentLanguage(), std::string("cpp"));
+
+    QVERIFY(ed.saveToFile(dir.filePath("notes.unknownext")));
+    QCOMPARE(ed.currentLanguage(), std::string("normal"));
+    QCOMPARE(ed.send(SCI_GETSTYLEAT, 0), sptr_t(0));
+}
+
+void TestEditorSave::plainSaveKeepsManuallyChosenLanguage() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath("data.unknownext");
+
+    EditorView ed;
+    ed.setTextFromUtf8("{\"a\":1}");
+    QVERIFY(ed.saveToFile(path));
+    QCOMPARE(ed.currentLanguage(), std::string("normal"));
+
+    // 用户手动选择语言后，原路径普通保存不得按扩展名重新检测覆盖回去
+    ed.applyLanguage("json");
+    ed.setTextFromUtf8("{\"a\":2}");
+    QVERIFY(ed.saveToFile());
+    QCOMPARE(ed.currentLanguage(), std::string("json"));
+}
+
+void TestEditorSave::failedSaveAsDoesNotChangeLanguage() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    EditorView ed;
+    ed.setTextFromUtf8("int main() { return 0; }\n");
+    QVERIFY2(!ed.saveToFile(dir.filePath("missing-dir/prog.cpp")),
+             "目标目录不存在时保存必须失败");
+    QCOMPARE(ed.currentLanguage(), std::string("normal"));
+    QVERIFY(ed.buffer()->getFilePath().empty());
+}
+
 
 
